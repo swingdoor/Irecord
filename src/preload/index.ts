@@ -1,47 +1,26 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-export interface FileInfo {
-  filePath: string
-  fileName: string
-  duration: number
-  format: string
-  sampleRate: number
-  channels: number
-  isVideo: boolean
-  fileSize: number
-  error?: string
-}
-
-export interface ProcessingProgress {
-  stage: string
-  percent: number
-}
-
-export interface RecognitionResult {
-  text: string
-  segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
-  speakerStats?: Record<string, { segments: number; duration: number }>
-  keywords?: Array<{ word: string; score: number }>
-  lang: string
-  strategy?: 'speaker-diarization' | 'vad' | 'plain'
-  error?: string
-}
-
 const electronAPI = {
-  selectFile: (): Promise<FileInfo | null> =>
-    ipcRenderer.invoke('select-file'),
+  addFiles: (): Promise<{ tasks: any[] }> =>
+    ipcRenderer.invoke('add-files'),
 
-  validateFile: (filePath: string): Promise<FileInfo> =>
-    ipcRenderer.invoke('validate-file', filePath),
+  addDroppedFiles: (filePaths: string[]): Promise<{ tasks: any[] }> =>
+    ipcRenderer.invoke('add-dropped-files', filePaths),
 
-  checkModel: (): Promise<boolean> =>
-    ipcRenderer.invoke('check-model'),
+  getTasks: (): Promise<any[]> =>
+    ipcRenderer.invoke('get-tasks'),
 
-  startProcessing: (filePath: string): Promise<RecognitionResult> =>
-    ipcRenderer.invoke('start-processing', filePath),
+  getTaskResult: (taskId: string): Promise<any> =>
+    ipcRenderer.invoke('get-task-result', taskId),
 
-  cancelProcessing: (): Promise<{ success: boolean }> =>
-    ipcRenderer.invoke('cancel-processing'),
+  deleteTask: (taskId: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('delete-task', taskId),
+
+  cancelCurrentTask: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('cancel-current-task'),
+
+  getCurrentTaskInfo: (): Promise<{ taskId: string | null; startTime: number }> =>
+    ipcRenderer.invoke('get-current-task-info'),
 
   exportTxt: (options: {
     text: string
@@ -51,10 +30,16 @@ const electronAPI = {
   }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('export-txt', options),
 
-  onProcessingProgress: (callback: (progress: ProcessingProgress) => void) => {
-    const handler = (_event: any, progress: ProcessingProgress) => callback(progress)
-    ipcRenderer.on('processing-progress', handler)
-    return () => ipcRenderer.removeListener('processing-progress', handler)
+  onTaskStatusChanged: (callback: (data: { taskId: string }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('task-status-changed', handler)
+    return () => ipcRenderer.removeListener('task-status-changed', handler)
+  },
+
+  onTaskProgress: (callback: (data: { taskId: string; stage: string; percent: number }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('task-progress', handler)
+    return () => ipcRenderer.removeListener('task-progress', handler)
   },
 }
 

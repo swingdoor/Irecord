@@ -2,29 +2,10 @@ import { app, ipcMain, dialog, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { writeFile } from 'fs/promises'
 import { statSync } from 'fs'
-import { cpus } from 'os'
-import { spawn, ChildProcess } from 'child_process'
-import { getAudioInfo, convertToWav, needsConversion } from './audio/ffmpeg'
+import { getAudioInfo } from './audio/ffmpeg'
 import { validateFile, getFileFilters } from './audio/validate'
-import { deleteTempFile } from './audio/temp'
-import { getQwen3AsrModelPath, checkModelExists, getVadModelPath, checkVadModelExists, getSegmentationModelPath, getEmbeddingModelPath, checkDiarizationModelsExist } from './utils/paths'
-
-let tempWavPath: string | null = null
-let processing = false
-let asrProcess: ChildProcess | null = null
-
-function buildFileInfo(filePath: string, info: any, isVideo: boolean) {
-  return {
-    filePath,
-    fileName: filePath.split(/[\\/]/).pop() || '',
-    duration: info.duration,
-    format: info.format,
-    sampleRate: info.sampleRate,
-    channels: info.channels,
-    isVideo,
-    fileSize: statSync(filePath).size,
-  }
-}
+import { createTask, getAllTasks, getTask, getResult, deleteTask } from './db/database'
+import { startQueue, cancelCurrentTask, getCurrentTaskId, getTaskStartTime } from './taskQueue'
 
 function formatTimestamp(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -33,142 +14,121 @@ function formatTimestamp(seconds: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+function getMainWindow(): BrowserWindow | null {
+  const wins = BrowserWindow.getAllWindows()
+  return wins.length > 0 ? wins[0] : null
+}
+
 export function registerIpcHandlers(): void {
-  // 选择文件
-  ipcMain.handle('select-file', async () => {
+  // 添加文件（支持多选）
+  ipcMain.handle('add-files', async () => {
     const result = await dialog.showOpenDialog({
       title: '选择音频/视频文件',
       filters: getFileFilters(),
-      properties: ['openFile']
+      properties: ['openFile', 'multiSelections']
     })
 
-    if (result.canceled || result.filePaths.length === 0) {
-      return null
+    if (result.canceled || result.filePaths.length === 0) return { tasks: [] }
+
+    const tasks = []
+    for (const filePath of result.filePaths) {
+      try {
+        const validation = await validateFile(filePath)
+        if (!validation.valid) continue
+
+        const info = await getAudioInfo(filePath)
+        const task = await createTask({
+          fileName: filePath.split(/[\\/]/).pop() || '',
+          filePath,
+          fileSize: statSync(filePath).size,
+          duration: info.duration,
+        })
+        tasks.push(JSON.parse(JSON.stringify(task)))
+      } catch {}
     }
 
-    const filePath = result.filePaths[0]
-    try {
-      const validation = await validateFile(filePath)
-      if (!validation.valid) return { error: validation.error }
-      const info = await getAudioInfo(filePath)
-      return buildFileInfo(filePath, info, validation.isVideo)
-    } catch (err: any) {
-      return { error: err.message }
+    // 启动队列
+    const win = getMainWindow()
+    if (win && tasks.length > 0) {
+      startQueue(win)
     }
+
+    return { tasks }
   })
 
-  // 验证拖放的文件
-  ipcMain.handle('validate-file', async (_event, filePath: string) => {
-    try {
-      const validation = await validateFile(filePath)
-      if (!validation.valid) return { error: validation.error }
-      const info = await getAudioInfo(filePath)
-      return buildFileInfo(filePath, info, validation.isVideo)
-    } catch (err: any) {
-      return { error: err.message }
+  // 验证并添加拖放的文件
+  ipcMain.handle('add-dropped-files', async (_event, filePaths: string[]) => {
+    const tasks = []
+    for (const filePath of filePaths) {
+      try {
+        const validation = await validateFile(filePath)
+        if (!validation.valid) continue
+
+        const info = await getAudioInfo(filePath)
+        const task = await createTask({
+          fileName: filePath.split(/[\\/]/).pop() || '',
+          filePath,
+          fileSize: statSync(filePath).size,
+          duration: info.duration,
+        })
+        tasks.push(JSON.parse(JSON.stringify(task)))
+      } catch {}
     }
+
+    const win = getMainWindow()
+    if (win && tasks.length > 0) {
+      startQueue(win)
+    }
+
+    return { tasks }
   })
 
-  // 检查模型是否存在
-  ipcMain.handle('check-model', () => checkModelExists())
-
-  // 开始处理
-  ipcMain.handle('start-processing', async (event, filePath: string) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return { error: '窗口不存在' }
-    if (!checkModelExists()) return { error: '模型文件缺失，请参考 resources/DOWNLOAD.md 下载模型' }
-    if (processing) return { error: '正在处理中，请等待当前任务完成' }
-
-    processing = true
-
-    try {
-      // 预处理：非 WAV 格式需要 FFmpeg 转换
-      let wavPath = filePath
-      if (await needsConversion(filePath)) {
-        win.webContents.send('processing-progress', { stage: 'preprocessing' })
-        wavPath = await convertToWav(filePath)
-        tempWavPath = wavPath
-      }
-
-      win.webContents.send('processing-progress', { stage: 'recognizing' })
-
-      // 统一使用 asr-process.js，根据可用模型自动选择策略
-      const scriptName = 'asr-process.js'
-      const asrScriptPath = app.isPackaged
-        ? join(process.resourcesPath, scriptName)
-        : join(__dirname, '../../src/main/engine', scriptName)
-
-      const inputData = JSON.stringify({
-        wavPath,
-        modelDir: getQwen3AsrModelPath(),
-        vadModelPath: getVadModelPath(),
-        segmentationModelPath: getSegmentationModelPath(),
-        embeddingModelPath: getEmbeddingModelPath(),
-        numThreads: cpus().length,
-      })
-
-      // 在独立 Node.js 子进程中运行识别（避免 Electron external buffer 限制）
-      const result = await new Promise<any>((resolve, reject) => {
-        asrProcess = spawn('node', [asrScriptPath], {
-          stdio: ['pipe', 'pipe', 'pipe'],
-        })
-
-        let stdout = ''
-        let stderr = ''
-
-        asrProcess.stdout?.on('data', (chunk) => {
-          stdout += chunk.toString()
-          const lines = stdout.split('\n')
-          stdout = lines.pop() || ''
-
-          for (const line of lines) {
-            if (!line.trim()) continue
-            try {
-              const msg = JSON.parse(line)
-              if (msg.type === 'result') {
-                resolve({
-                  text: msg.text,
-                  segments: msg.segments,
-                  speakerStats: msg.speakerStats,
-                  keywords: msg.keywords,
-                  lang: msg.lang,
-                  strategy: msg.strategy,
-                })
-              } else if (msg.type === 'error') {
-                reject(new Error(msg.message))
-              }
-            } catch {}
-          }
-        })
-
-        asrProcess.stderr?.on('data', (chunk) => { stderr += chunk.toString() })
-        asrProcess.on('close', (code) => {
-          asrProcess = null
-          if (code !== 0) reject(new Error(stderr || `子进程退出，代码: ${code}`))
-        })
-        asrProcess.on('error', (err) => { asrProcess = null; reject(err) })
-
-        asrProcess.stdin?.write(inputData)
-        asrProcess.stdin?.end()
-      })
-
-      if (tempWavPath) { deleteTempFile(tempWavPath); tempWavPath = null }
-      win.webContents.send('processing-progress', { stage: 'done', percent: 100 })
-      processing = false
-      return result
-    } catch (err: any) {
-      if (tempWavPath) { deleteTempFile(tempWavPath); tempWavPath = null }
-      processing = false
-      return { error: err.message }
-    }
+  // 获取所有任务
+  ipcMain.handle('get-tasks', async () => {
+    const tasks = await getAllTasks()
+    return JSON.parse(JSON.stringify(tasks))
   })
 
-  // 取消处理
-  ipcMain.handle('cancel-processing', () => {
-    if (asrProcess) { asrProcess.kill(); asrProcess = null }
-    if (tempWavPath) { deleteTempFile(tempWavPath); tempWavPath = null }
-    processing = false
+  // 获取任务结果
+  ipcMain.handle('get-task-result', async (_event, taskId: string) => {
+    const task = await getTask(taskId)
+    if (!task) return { error: '任务不存在' }
+
+    const result = await getResult(taskId)
+    if (!result) return { error: '结果不存在' }
+
+    return JSON.parse(JSON.stringify({
+      task,
+      result: {
+        text: result.text,
+        segments: result.segments ? JSON.parse(result.segments) : undefined,
+        speakerStats: result.speakerStats ? JSON.parse(result.speakerStats) : undefined,
+        keywords: result.keywords ? JSON.parse(result.keywords) : undefined,
+        lang: result.lang,
+        strategy: result.strategy,
+      },
+    }))
+  })
+
+  // 删除任务
+  ipcMain.handle('delete-task', async (_event, taskId: string) => {
+    await deleteTask(taskId)
     return { success: true }
+  })
+
+  // 取消当前任务
+  ipcMain.handle('cancel-current-task', () => {
+    const win = getMainWindow()
+    if (win) cancelCurrentTask(win)
+    return { success: true }
+  })
+
+  // 获取当前处理中的任务信息
+  ipcMain.handle('get-current-task-info', () => {
+    return {
+      taskId: getCurrentTaskId(),
+      startTime: getTaskStartTime(),
+    }
   })
 
   // 导出 TXT 文件
@@ -189,7 +149,6 @@ export function registerIpcHandlers(): void {
     try {
       let content = ''
 
-      // 关键词摘要
       if (options.keywords?.length) {
         content += '关键词：' + options.keywords.map(k => k.word).join('、') + '\n\n'
       }

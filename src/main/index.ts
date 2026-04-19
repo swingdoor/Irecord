@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { cleanupOldTempFiles, cleanupTempFiles } from './audio/temp'
 import { registerIpcHandlers } from './ipc'
+import { closeDb } from './db/database'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -51,5 +52,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   cleanupTempFiles()
+  closeDb()
 })
 

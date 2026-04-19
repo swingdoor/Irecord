@@ -1,0 +1,214 @@
+import { app } from 'electron'
+import { join } from 'path'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { randomUUID } from 'crypto'
+import initSqlJs, { Database as SqlJsDatabase } from 'sql.js'
+
+let db: SqlJsDatabase | null = null
+let dbPath: string = ''
+
+export interface Task {
+  id: string
+  fileName: string
+  filePath: string
+  fileSize: number
+  duration: number
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  strategy: string | null
+  error: string | null
+  createdAt: string
+  completedAt: string | null
+  processingTime: number | null
+  wordCount: number | null
+}
+
+export interface TaskResult {
+  taskId: string
+  text: string
+  segments: string | null
+  speakerStats: string | null
+  keywords: string | null
+  lang: string
+  strategy: string | null
+}
+
+async function getDb(): Promise<SqlJsDatabase> {
+  if (db) return db
+
+  const SQL = await initSqlJs()
+  dbPath = join(app.getPath('userData'), 'tasks.db')
+
+  if (existsSync(dbPath)) {
+    const buffer = readFileSync(dbPath)
+    db = new SQL.Database(buffer)
+  } else {
+    db = new SQL.Database()
+  }
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      fileName TEXT NOT NULL,
+      filePath TEXT NOT NULL,
+      fileSize INTEGER DEFAULT 0,
+      duration REAL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      strategy TEXT,
+      error TEXT,
+      createdAt TEXT NOT NULL,
+      completedAt TEXT,
+      processingTime REAL,
+      wordCount INTEGER
+    )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS results (
+      taskId TEXT PRIMARY KEY,
+      text TEXT,
+      segments TEXT,
+      speakerStats TEXT,
+      keywords TEXT,
+      lang TEXT,
+      strategy TEXT
+    )
+  `)
+
+  return db
+}
+
+function saveDb() {
+  if (db && dbPath) {
+    const data = db.export()
+    writeFileSync(dbPath, Buffer.from(data))
+  }
+}
+
+function queryAll(d: SqlJsDatabase, sql: string, params: any[] = []): any[] {
+  const stmt = d.prepare(sql)
+  if (params.length) stmt.bind(params)
+  const rows: any[] = []
+  while (stmt.step()) {
+    rows.push(JSON.parse(JSON.stringify(stmt.getAsObject())))
+  }
+  stmt.free()
+  return rows
+}
+
+function queryOne(d: SqlJsDatabase, sql: string, params: any[] = []): any | undefined {
+  const rows = queryAll(d, sql, params)
+  return rows[0]
+}
+
+// ===== Task CRUD =====
+
+export async function createTask(file: { fileName: string; filePath: string; fileSize: number; duration: number }): Promise<Task> {
+  const d = await getDb()
+  const task: Task = {
+    id: randomUUID(),
+    fileName: file.fileName,
+    filePath: file.filePath,
+    fileSize: file.fileSize,
+    duration: file.duration,
+    status: 'pending',
+    strategy: null,
+    error: null,
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    processingTime: null,
+    wordCount: null,
+  }
+
+  d.run(
+    'INSERT INTO tasks (id, fileName, filePath, fileSize, duration, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [task.id, task.fileName, task.filePath, task.fileSize, task.duration, task.status, task.createdAt]
+  )
+  saveDb()
+  return task
+}
+
+export async function getTask(id: string): Promise<Task | undefined> {
+  const d = await getDb()
+  return queryOne(d, 'SELECT * FROM tasks WHERE id = ?', [id])
+}
+
+export async function getAllTasks(): Promise<Task[]> {
+  const d = await getDb()
+  return queryAll(d, 'SELECT * FROM tasks ORDER BY createdAt DESC')
+}
+
+export async function updateTask(id: string, updates: Partial<Pick<Task, 'status' | 'strategy' | 'error' | 'completedAt' | 'processingTime' | 'wordCount'>>) {
+  const d = await getDb()
+  const fields: string[] = []
+  const values: any[] = []
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`)
+      values.push(value)
+    }
+  }
+
+  if (fields.length === 0) return
+  values.push(id)
+
+  d.run(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`, values)
+  saveDb()
+}
+
+export async function deleteTask(id: string) {
+  const d = await getDb()
+  d.run('DELETE FROM results WHERE taskId = ?', [id])
+  d.run('DELETE FROM tasks WHERE id = ?', [id])
+  saveDb()
+}
+
+// ===== Result CRUD =====
+
+export async function saveResult(taskId: string, result: {
+  text: string
+  segments?: any[]
+  speakerStats?: Record<string, any>
+  keywords?: any[]
+  lang: string
+  strategy?: string
+}) {
+  const d = await getDb()
+  d.run(
+    'INSERT OR REPLACE INTO results (taskId, text, segments, speakerStats, keywords, lang, strategy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [
+      taskId,
+      result.text,
+      result.segments ? JSON.stringify(result.segments) : null,
+      result.speakerStats ? JSON.stringify(result.speakerStats) : null,
+      result.keywords ? JSON.stringify(result.keywords) : null,
+      result.lang,
+      result.strategy || null,
+    ]
+  )
+  saveDb()
+}
+
+export async function getResult(taskId: string): Promise<TaskResult | undefined> {
+  const d = await getDb()
+  return queryOne(d, 'SELECT * FROM results WHERE taskId = ?', [taskId])
+}
+
+export async function getNextPendingTask(): Promise<Task | undefined> {
+  const d = await getDb()
+  return queryOne(d, "SELECT * FROM tasks WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 1")
+}
+
+export async function hasProcessingTask(): Promise<boolean> {
+  const d = await getDb()
+  const row = queryOne(d, "SELECT COUNT(*) as count FROM tasks WHERE status = 'processing'")
+  return row?.count > 0
+}
+
+export function closeDb() {
+  if (db) {
+    saveDb()
+    db.close()
+    db = null
+  }
+}

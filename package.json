@@ -30,6 +30,7 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "sherpa-onnx-node": "^1.12.38",
+    "sql.js": "^1.14.1",
     "zustand": "^5.0.12"
   }
 }

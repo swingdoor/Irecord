@@ -1,91 +1,66 @@
 import { create } from 'zustand'
 
-export type AppPage = 'upload' | 'processing' | 'result'
+export type AppPage = 'taskList' | 'taskDetail'
 
-export interface FileInfo {
-  filePath: string
+export interface Task {
+  id: string
   fileName: string
-  duration: number
-  format: string
-  sampleRate: number
-  channels: number
-  isVideo: boolean
+  filePath: string
   fileSize: number
+  duration: number
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  strategy: string | null
+  error: string | null
+  createdAt: string
+  completedAt: string | null
+  processingTime: number | null
+  wordCount: number | null
 }
 
-export interface ProcessingState {
-  stage: string
-  percent: number
-  startTime: number
-  elapsedSeconds: number
-}
-
-export interface RecognitionResult {
+export interface TaskResultData {
   text: string
   segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
   speakerStats?: Record<string, { segments: number; duration: number }>
   keywords?: Array<{ word: string; score: number }>
   lang: string
-  strategy?: 'speaker-diarization' | 'vad' | 'plain'
+  strategy?: string
 }
 
 interface AppState {
-  // 页面状态
   page: AppPage
   setPage: (page: AppPage) => void
 
-  // 文件信息
-  fileInfo: FileInfo | null
-  setFileInfo: (info: FileInfo | null) => void
+  tasks: Task[]
+  setTasks: (tasks: Task[]) => void
+  refreshTasks: () => Promise<void>
 
-  // 处理状态
-  processing: ProcessingState
-  setProcessing: (state: Partial<ProcessingState>) => void
-  resetProcessing: () => void
+  currentTaskId: string | null
+  setCurrentTaskId: (id: string | null) => void
 
-  // 识别结果
-  result: RecognitionResult | null
-  setResult: (result: RecognitionResult | null) => void
+  currentResult: TaskResultData | null
+  setCurrentResult: (result: TaskResultData | null) => void
 
-  // 错误信息
-  error: string | null
-  setError: (error: string | null) => void
-
-  // 重置所有状态
-  reset: () => void
-}
-
-const initialProcessing: ProcessingState = {
-  stage: '',
-  percent: 0,
-  startTime: 0,
-  elapsedSeconds: 0,
+  currentTask: Task | null
+  setCurrentTask: (task: Task | null) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  page: 'upload',
+  page: 'taskList',
   setPage: (page) => set({ page }),
 
-  fileInfo: null,
-  setFileInfo: (fileInfo) => set({ fileInfo }),
+  tasks: [],
+  setTasks: (tasks) => set({ tasks }),
+  refreshTasks: async () => {
+    const tasks = await window.electronAPI.getTasks()
+    set({ tasks })
+  },
 
-  processing: initialProcessing,
-  setProcessing: (state) =>
-    set((prev) => ({ processing: { ...prev.processing, ...state } })),
-  resetProcessing: () => set({ processing: initialProcessing }),
+  currentTaskId: null,
+  setCurrentTaskId: (currentTaskId) => set({ currentTaskId }),
 
-  result: null,
-  setResult: (result) => set({ result }),
+  currentResult: null,
+  setCurrentResult: (currentResult) => set({ currentResult }),
 
-  error: null,
-  setError: (error) => set({ error }),
-
-  reset: () =>
-    set({
-      page: 'upload',
-      fileInfo: null,
-      processing: initialProcessing,
-      result: null,
-      error: null,
-    }),
+  currentTask: null,
+  setCurrentTask: (currentTask) => set({ currentTask }),
 }))

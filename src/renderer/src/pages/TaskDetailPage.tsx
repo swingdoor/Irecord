@@ -1,6 +1,6 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { ArrowLeft, Copy, Download, Check } from 'lucide-react'
-import { useAppStore } from '../stores/appStore'
+import { useAppStore, TaskResultData } from '../stores/appStore'
 
 const SPEAKER_COLORS = [
   'text-blue-700 bg-blue-50 border-blue-200',
@@ -75,11 +75,32 @@ function HighlightText({ text, keyword }: { text: string; keyword: string | null
   )
 }
 
-export default function ResultPage() {
-  const { fileInfo, result, processing, reset } = useAppStore()
+export default function TaskDetailPage() {
+  const { currentTaskId, setPage, currentResult, setCurrentResult, currentTask, setCurrentTask } = useAppStore()
   const [copied, setCopied] = useState(false)
   const [showTimestamps, setShowTimestamps] = useState(true)
   const [activeKeyword, setActiveKeyword] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!currentTaskId) { setPage('taskList'); return }
+
+    const loadResult = async () => {
+      setLoading(true)
+      const data = await window.electronAPI.getTaskResult(currentTaskId)
+      if (data.error) {
+        setPage('taskList')
+        return
+      }
+      setCurrentTask(data.task)
+      setCurrentResult(data.result)
+      setLoading(false)
+    }
+    loadResult()
+  }, [currentTaskId, setPage, setCurrentResult, setCurrentTask])
+
+  const result = currentResult
+  const task = currentTask
 
   const hasTimestamps = !!(result?.segments && result.segments.length > 0)
   const hasSpeakers = hasTimestamps && result!.segments!.some(s => s.speaker)
@@ -106,12 +127,21 @@ export default function ResultPage() {
     if (res.error) alert(res.error)
   }, [result, hasTimestamps, showTimestamps])
 
-  const handleBack = useCallback(() => { reset() }, [reset])
+  const handleBack = useCallback(() => {
+    setCurrentResult(null)
+    setCurrentTask(null)
+    setPage('taskList')
+  }, [setPage, setCurrentResult, setCurrentTask])
 
-  if (!result || !fileInfo) return null
+  if (loading || !result || !task) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-400">加载中...</p>
+      </div>
+    )
+  }
 
   const wordCount = result.text.replace(/\s/g, '').length
-  const elapsedSeconds = Math.floor((Date.now() - processing.startTime) / 1000)
 
   return (
     <div className="min-h-screen flex flex-col p-6">
@@ -140,7 +170,7 @@ export default function ResultPage() {
       <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-white border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-gray-500 mb-1">文件</p>
-          <p className="text-sm font-medium text-gray-800 truncate">{fileInfo.fileName}</p>
+          <p className="text-sm font-medium text-gray-800 truncate">{task.fileName}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-gray-500 mb-1">字数</p>
@@ -148,7 +178,7 @@ export default function ResultPage() {
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-gray-500 mb-1">耗时</p>
-          <p className="text-sm font-medium text-gray-800">{formatDuration(elapsedSeconds)}</p>
+          <p className="text-sm font-medium text-gray-800">{task.processingTime ? formatDuration(task.processingTime) : '-'}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-gray-500 mb-1">策略{hasSpeakers ? ` · ${speakerList.length} 人` : ''}</p>
