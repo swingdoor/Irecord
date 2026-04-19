@@ -1,0 +1,34 @@
+{
+  "name": "irecord",
+  "version": "0.1.0",
+  "description": "本地语音识别转写工具",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/fluent-ffmpeg": "^2.1.28",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^41.2.1",
+    "electron-vite": "^5.0.0",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.2"
+  },
+  "dependencies": {
+    "fluent-ffmpeg": "^2.1.3",
+    "lucide-react": "^1.8.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "sherpa-onnx-node": "^1.12.38",
+    "zustand": "^5.0.12"
+  }
+}

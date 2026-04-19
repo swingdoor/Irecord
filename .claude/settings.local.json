@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:k2-fsa.github.io)",
+      "WebFetch(domain:npmjs.com)",
+      "Bash(openspec new:*)",
+      "Bash(openspec status:*)",
+      "Bash(openspec instructions:*)",
+      "Bash(npm --version)",
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(npm run:*)",
+      "Bash(cat C:\\\\\\\\Users\\\\\\\\HONOR\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\D--03code-project-05Irecord\\\\\\\\ec35ce0b-f36b-4fdb-8a35-c4a18f3f9f63\\\\\\\\tasks\\\\\\\\bk446yq08.output)",
+      "Bash(node -e \"const sherpa = require\\('sherpa-onnx'\\); console.log\\('sherpa-onnx loaded successfully'\\); console.log\\('Available exports:', Object.keys\\(sherpa\\).slice\\(0, 10\\).join\\(', '\\)\\);\")",
+      "Bash(node scripts/verify-sherpa.js)",
+      "Bash(node -e \"const s = require\\('sherpa-onnx'\\); console.log\\(Object.keys\\(s\\).filter\\(k => k.toLowerCase\\(\\).includes\\('offline'\\)\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(node -e ':*)",
+      "Bash(pkill -f electron)",
+      "Bash(taskkill /F /IM electron.exe)",
+      "Bash(node --max-old-space-size=4096 -e ':*)",
+      "Bash(npm uninstall:*)",
+      "Bash(node -e \"const s = require\\('sherpa-onnx-node'\\); console.log\\('OK:', Object.keys\\(s\\).join\\(', '\\)\\)\")",
+      "Bash(taskkill //F //IM electron.exe)",
+      "Bash(node scripts/test-e2e.js)",
+      "Bash(where ffmpeg:*)",
+      "Bash(echo \"Electron started, PID: $!\")",
+      "Bash(npx electron:*)",
+      "Bash(grep -v \"^\\\\\\\\[\")",
+      "Bash(grep \"\\\\\\\\[test\\\\\\\\]\")",
+      "Bash(echo '{\"wavPath\":\"resources/models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/test_wavs/ja1.wav\",\"modelDir\":\"D:\\\\\\\\03code_project\\\\\\\\05Irecord\\\\\\\\resources\\\\\\\\models\\\\\\\\sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25\",\"numThreads\":2}')",
+      "Bash(node src/main/engine/asr-process.js)",
+      "Bash(curl -L -o resources/models/silero-vad/silero_vad.onnx \"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx\")",
+      "Bash(rm -f src/workers/asr-worker.ts src/main/engine/sherpa.ts src/main/engine/asr-vad-align-process.js src/shared/types.ts)",
+      "Bash(rmdir src/workers)",
+      "Bash(rmdir src/shared)"
+    ]
+  }
+}
