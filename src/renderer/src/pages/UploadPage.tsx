@@ -66,7 +66,7 @@ export default function UploadPage() {
   const handleStartProcessing = useCallback(async () => {
     if (!fileInfo) return
     setError(null)
-    setProcessing({ startTime: Date.now(), percent: 0, stage: 'preprocessing' })
+    setProcessing({ startTime: Date.now(), percent: 0, stage: 'recognizing' })
     setPage('processing')
   }, [fileInfo, setPage, setProcessing, setError])
 

@@ -19,8 +19,10 @@ export interface ProcessingProgress {
 
 export interface RecognitionResult {
   text: string
-  segments?: Array<{ text: string; start: number; end: number }>
+  segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
+  speakerStats?: Record<string, { segments: number; duration: number }>
   lang: string
+  strategy?: 'speaker-diarization' | 'vad' | 'plain'
   error?: string
 }
 
@@ -43,7 +45,7 @@ const electronAPI = {
   exportTxt: (options: {
     text: string
     includeTimestamps: boolean
-    segments?: Array<{ text: string; start: number; end: number }>
+    segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
   }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('export-txt', options),
 

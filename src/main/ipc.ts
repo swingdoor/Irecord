@@ -7,7 +7,7 @@ import { spawn, ChildProcess } from 'child_process'
 import { getAudioInfo, convertToWav, needsConversion } from './audio/ffmpeg'
 import { validateFile, getFileFilters } from './audio/validate'
 import { deleteTempFile } from './audio/temp'
-import { getQwen3AsrModelPath, checkModelExists, getVadModelPath, checkVadModelExists } from './utils/paths'
+import { getQwen3AsrModelPath, checkModelExists, getVadModelPath, checkVadModelExists, getSegmentationModelPath, getEmbeddingModelPath, checkDiarizationModelsExist } from './utils/paths'
 
 let tempWavPath: string | null = null
 let processing = false
@@ -85,16 +85,15 @@ export function registerIpcHandlers(): void {
       // 预处理：非 WAV 格式需要 FFmpeg 转换
       let wavPath = filePath
       if (await needsConversion(filePath)) {
-        win.webContents.send('processing-progress', { stage: 'preprocessing', percent: 10 })
+        win.webContents.send('processing-progress', { stage: 'preprocessing' })
         wavPath = await convertToWav(filePath)
         tempWavPath = wavPath
       }
 
-      win.webContents.send('processing-progress', { stage: 'initializing', percent: 20 })
+      win.webContents.send('processing-progress', { stage: 'recognizing' })
 
-      // 选择子进程脚本：有 VAD 模型则使用 VAD 分段识别，否则整体识别
-      const useVAD = checkVadModelExists()
-      const scriptName = useVAD ? 'asr-vad-process.js' : 'asr-process.js'
+      // 统一使用 asr-process.js，根据可用模型自动选择策略
+      const scriptName = 'asr-process.js'
       const asrScriptPath = app.isPackaged
         ? join(process.resourcesPath, scriptName)
         : join(__dirname, '../../src/main/engine', scriptName)
@@ -103,6 +102,8 @@ export function registerIpcHandlers(): void {
         wavPath,
         modelDir: getQwen3AsrModelPath(),
         vadModelPath: getVadModelPath(),
+        segmentationModelPath: getSegmentationModelPath(),
+        embeddingModelPath: getEmbeddingModelPath(),
         numThreads: cpus().length,
       })
 
@@ -124,17 +125,13 @@ export function registerIpcHandlers(): void {
             if (!line.trim()) continue
             try {
               const msg = JSON.parse(line)
-              if (msg.type === 'progress') {
-                const mappedPercent = 20 + (msg.percent / 100) * 70
-                win.webContents.send('processing-progress', {
-                  stage: msg.stage,
-                  percent: Math.round(mappedPercent)
-                })
-              } else if (msg.type === 'result') {
+              if (msg.type === 'result') {
                 resolve({
                   text: msg.text,
                   segments: msg.segments,
+                  speakerStats: msg.speakerStats,
                   lang: msg.lang,
+                  strategy: msg.strategy,
                 })
               } else if (msg.type === 'error') {
                 reject(new Error(msg.message))
@@ -177,7 +174,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('export-txt', async (_event, options: {
     text: string
     includeTimestamps: boolean
-    segments?: Array<{ text: string; start: number; end: number }>
+    segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
   }) => {
     const result = await dialog.showSaveDialog({
       title: '导出转写结果',
@@ -192,7 +189,11 @@ export function registerIpcHandlers(): void {
 
       if (options.includeTimestamps && options.segments?.length) {
         content = options.segments
-          .map(seg => `[${formatTimestamp(seg.start)} - ${formatTimestamp(seg.end)}] ${seg.text}`)
+          .map(seg => {
+            const time = `[${formatTimestamp(seg.start)} - ${formatTimestamp(seg.end)}]`
+            const speaker = seg.speaker ? ` ${seg.speaker}:` : ''
+            return `${time}${speaker} ${seg.text}`
+          })
           .join('\n')
       } else {
         content = options.text

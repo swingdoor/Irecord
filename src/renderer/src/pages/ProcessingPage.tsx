@@ -4,8 +4,6 @@ import { useAppStore } from '../stores/appStore'
 
 const STAGE_LABELS: Record<string, string> = {
   preprocessing: '音频预处理',
-  initializing: '加载模型',
-  segmenting: '音频分段',
   recognizing: '语音识别中',
   done: '处理完成',
 }

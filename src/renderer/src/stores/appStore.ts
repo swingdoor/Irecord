@@ -22,8 +22,10 @@ export interface ProcessingState {
 
 export interface RecognitionResult {
   text: string
-  segments?: Array<{ text: string; start: number; end: number }>
+  segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
+  speakerStats?: Record<string, { segments: number; duration: number }>
   lang: string
+  strategy?: 'speaker-diarization' | 'vad' | 'plain'
 }
 
 interface AppState {

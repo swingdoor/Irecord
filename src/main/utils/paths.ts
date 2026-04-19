@@ -58,6 +58,34 @@ export function checkVadModelExists(): boolean {
 }
 
 /**
+ * 获取说话人分离模型目录路径
+ */
+export function getDiarizationModelPath(): string {
+  return getResourcePath('models', 'speaker-diarization')
+}
+
+/**
+ * 获取说话人分割模型路径
+ */
+export function getSegmentationModelPath(): string {
+  return join(getDiarizationModelPath(), 'pyannote_segmentation.onnx')
+}
+
+/**
+ * 获取说话人嵌入模型路径
+ */
+export function getEmbeddingModelPath(): string {
+  return join(getDiarizationModelPath(), '3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx')
+}
+
+/**
+ * 检查说话人分离模型是否完整
+ */
+export function checkDiarizationModelsExist(): boolean {
+  return existsSync(getSegmentationModelPath()) && existsSync(getEmbeddingModelPath())
+}
+
+/**
  * 获取 FFmpeg 可执行文件路径
  */
 export function getFfmpegPath(): string {

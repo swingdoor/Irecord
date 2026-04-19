@@ -2,6 +2,27 @@ import { useState, useCallback } from 'react'
 import { ArrowLeft, Copy, Download, Check } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 
+const SPEAKER_COLORS = [
+  'text-blue-700 bg-blue-50 border-blue-200',
+  'text-emerald-700 bg-emerald-50 border-emerald-200',
+  'text-orange-700 bg-orange-50 border-orange-200',
+  'text-purple-700 bg-purple-50 border-purple-200',
+  'text-rose-700 bg-rose-50 border-rose-200',
+  'text-cyan-700 bg-cyan-50 border-cyan-200',
+  'text-amber-700 bg-amber-50 border-amber-200',
+  'text-indigo-700 bg-indigo-50 border-indigo-200',
+]
+
+const SPEAKER_DOT_COLORS = [
+  'bg-blue-500', 'bg-emerald-500', 'bg-orange-500', 'bg-purple-500',
+  'bg-rose-500', 'bg-cyan-500', 'bg-amber-500', 'bg-indigo-500',
+]
+
+function getSpeakerColorIndex(speaker: string, speakerList: string[]): number {
+  const idx = speakerList.indexOf(speaker)
+  return idx >= 0 ? idx % SPEAKER_COLORS.length : 0
+}
+
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
@@ -9,14 +30,19 @@ function formatDuration(seconds: number): string {
 }
 
 function formatTimestamp(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
+  const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
-  const ms = Math.floor((seconds % 1) * 1000)
-  if (h > 0) {
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`
+  const ms = Math.floor((seconds % 1) * 100)
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(2, '0')}`
+}
+
+function getStrategyLabel(strategy?: string): string {
+  switch (strategy) {
+    case 'speaker-diarization': return '说话人分离'
+    case 'vad': return 'VAD 分段'
+    case 'plain': return '整体识别'
+    default: return '未知'
   }
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`
 }
 
 export default function ResultPage() {
@@ -25,6 +51,10 @@ export default function ResultPage() {
   const [showTimestamps, setShowTimestamps] = useState(true)
 
   const hasTimestamps = !!(result?.segments && result.segments.length > 0)
+  const hasSpeakers = hasTimestamps && result!.segments!.some(s => s.speaker)
+  const speakerList = hasSpeakers
+    ? [...new Set(result!.segments!.map(s => s.speaker).filter(Boolean) as string[])]
+    : []
 
   const handleCopy = useCallback(async () => {
     if (!result) return
@@ -40,60 +70,41 @@ export default function ResultPage() {
       includeTimestamps: hasTimestamps && showTimestamps,
       segments: result.segments,
     })
-    if (res.error) {
-      alert(res.error)
-    }
+    if (res.error) alert(res.error)
   }, [result, hasTimestamps, showTimestamps])
 
-  const handleBack = useCallback(() => {
-    reset()
-  }, [reset])
+  const handleBack = useCallback(() => { reset() }, [reset])
 
-  if (!result || !fileInfo) {
-    return null
-  }
+  if (!result || !fileInfo) return null
 
   const wordCount = result.text.replace(/\s/g, '').length
   const elapsedSeconds = Math.floor((Date.now() - processing.startTime) / 1000)
 
   return (
     <div className="min-h-screen flex flex-col p-6">
+      {/* 顶部栏 */}
       <div className="flex items-center justify-between mb-6">
-        <button
-          onClick={handleBack}
-          className="flex items-center gap-1.5 text-gray-600 hover:text-gray-800 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>返回</span>
+        <button onClick={handleBack} className="flex items-center gap-1.5 text-gray-600 hover:text-gray-800 transition-colors">
+          <ArrowLeft className="w-4 h-4" /><span>返回</span>
         </button>
-
         <div className="flex items-center gap-2">
           {hasTimestamps && (
-            <button
-              onClick={() => setShowTimestamps(!showTimestamps)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            >
+            <button onClick={() => setShowTimestamps(!showTimestamps)} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
               {showTimestamps ? '隐藏时间戳' : '显示时间戳'}
             </button>
           )}
-          <button
-            onClick={handleCopy}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
+          <button onClick={handleCopy} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
             {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
             {copied ? '已复制' : '复制全部'}
           </button>
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            导出 TXT
+          <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+            <Download className="w-4 h-4" />导出 TXT
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      {/* 摘要信息 */}
+      <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-white border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-gray-500 mb-1">文件</p>
           <p className="text-sm font-medium text-gray-800 truncate">{fileInfo.fileName}</p>
@@ -106,21 +117,49 @@ export default function ResultPage() {
           <p className="text-xs text-gray-500 mb-1">耗时</p>
           <p className="text-sm font-medium text-gray-800">{formatDuration(elapsedSeconds)}</p>
         </div>
+        <div className="bg-white border border-gray-200 rounded-lg p-3">
+          <p className="text-xs text-gray-500 mb-1">策略{hasSpeakers ? ` · ${speakerList.length} 人` : ''}</p>
+          <p className="text-sm font-medium text-gray-800">{getStrategyLabel(result.strategy)}</p>
+        </div>
       </div>
 
+      {/* 说话人统计 */}
+      {hasSpeakers && result.speakerStats && (
+        <div className="flex flex-wrap gap-3 mb-4">
+          {speakerList.map((speaker) => {
+            const stats = result.speakerStats![speaker]
+            const colorIdx = getSpeakerColorIndex(speaker, speakerList)
+            return (
+              <div key={speaker} className="flex items-center gap-2 text-sm text-gray-600">
+                <span className={`w-2.5 h-2.5 rounded-full ${SPEAKER_DOT_COLORS[colorIdx]}`} />
+                <span>{speaker}</span>
+                {stats && <span className="text-gray-400">({stats.segments}段, {formatDuration(stats.duration)})</span>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* 转写文本 */}
       <div className="flex-1 bg-white border border-gray-200 rounded-lg p-6 overflow-auto">
         {hasTimestamps && showTimestamps ? (
-          <div className="space-y-3">
-            {result.segments!.map((seg, i) => (
-              <div key={i} className="flex gap-3">
-                <span className="text-xs text-gray-400 font-mono whitespace-nowrap pt-0.5">
-                  {formatTimestamp(seg.start)} - {formatTimestamp(seg.end)}
-                </span>
-                <p className="text-sm text-gray-800 leading-relaxed select-text flex-1">
-                  {seg.text}
-                </p>
-              </div>
-            ))}
+          <div className="space-y-2">
+            {result.segments!.map((seg, i) => {
+              const colorIdx = seg.speaker ? getSpeakerColorIndex(seg.speaker, speakerList) : 0
+              return (
+                <div key={i} className={`flex gap-3 p-2 rounded-lg ${seg.speaker ? SPEAKER_COLORS[colorIdx] : ''} border ${seg.speaker ? '' : 'border-transparent'}`}>
+                  <div className="shrink-0 pt-0.5">
+                    <span className="text-xs font-mono text-gray-400 whitespace-nowrap">
+                      {formatTimestamp(seg.start)} - {formatTimestamp(seg.end)}
+                    </span>
+                    {seg.speaker && (
+                      <p className="text-xs font-medium mt-0.5">{seg.speaker}</p>
+                    )}
+                  </div>
+                  <p className="text-sm leading-relaxed select-text flex-1">{seg.text}</p>
+                </div>
+              )
+            })}
           </div>
         ) : (
           <pre className="whitespace-pre-wrap text-gray-800 text-sm leading-relaxed font-sans select-text">
