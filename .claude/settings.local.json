@@ -34,7 +34,32 @@
       "Bash(curl -L -o resources/models/silero-vad/silero_vad.onnx \"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx\")",
       "Bash(rm -f src/workers/asr-worker.ts src/main/engine/sherpa.ts src/main/engine/asr-vad-align-process.js src/shared/types.ts)",
       "Bash(rmdir src/workers)",
-      "Bash(rmdir src/shared)"
+      "Bash(rmdir src/shared)",
+      "Bash(npx tsc:*)",
+      "Bash(npx electron-rebuild:*)",
+      "Bash(curl -s \"https://api.github.com/repos/k2-fsa/sherpa-onnx/releases\")",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npm search:*)",
+      "Bash(npm info:*)",
+      "Bash(node -e \"const s = require\\('sherpa-onnx-node'\\); console.log\\(Object.keys\\(s\\)\\)\")",
+      "WebFetch(domain:www.amd.com)",
+      "Bash(curl -sL \"https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/latest\")",
+      "Bash(unzip -l ort-dml.nupkg)",
+      "Bash(unzip -o ort-dml.nupkg \"runtimes/win-x64/native/*\")",
+      "Bash(mkdir -p __TRACKED_VAR__/backup)",
+      "Bash(cp __TRACKED_VAR__/onnxruntime.dll __TRACKED_VAR__/backup/onnxruntime.dll)",
+      "Bash(cp __TRACKED_VAR__/onnxruntime_providers_shared.dll __TRACKED_VAR__/backup/onnxruntime_providers_shared.dll)",
+      "Bash(curl -sL \"https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.39/sherpa-onnx-v1.12.39-win-x64-cuda.tar.bz2\" -o win-x64-cuda.tar.bz2)",
+      "Bash(cp __TRACKED_VAR__/backup/onnxruntime.dll __TRACKED_VAR__/onnxruntime.dll)",
+      "Bash(cp __TRACKED_VAR__/backup/onnxruntime_providers_shared.dll __TRACKED_VAR__/onnxruntime_providers_shared.dll)",
+      "Bash(rm -rf __TRACKED_VAR__/backup)",
+      "Bash(rm -rf temp_dml)",
+      "Bash(ls node_modules/sherpa-onnx-win-x64/backup/)",
+      "Bash(rm -rf temp_dml/runtimes temp_dml/ort-dml.nupkg temp_dml/build temp_dml/*.nuspec)",
+      "Bash(ls -la node_modules/sherpa-onnx-win-x64/*.dll)",
+      "Bash(npx electron-vite:*)",
+      "Bash(node:*)",
+      "Bash(D:/03code_project/05Irecord/resources/ffmpeg/ffprobe.exe:*)"
     ]
   }
 }

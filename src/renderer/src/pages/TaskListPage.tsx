@@ -1,43 +1,31 @@
 import { useEffect, useCallback, useState } from 'react'
-import { Plus, FileAudio, Trash2, Loader2, CheckCircle, XCircle, Clock, X, Play, StopCircle } from 'lucide-react'
+import { Typography, Alert, Button } from 'antd'
+import { SettingOutlined } from '@ant-design/icons'
 import { useAppStore, Task } from '../stores/appStore'
+import { FeatureCards } from '../components/FeatureCards'
+import { TaskTable } from '../components/TaskTable'
+import { SettingsModal } from '../components/SettingsModal'
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-function ProcessingTimer({ startTime }: { startTime: number }) {
-  const [elapsed, setElapsed] = useState(0)
-  useEffect(() => {
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000)
-    return () => clearInterval(timer)
-  }, [startTime])
-  return <span>{formatDuration(elapsed)}</span>
-}
+const { Title } = Typography
 
 export default function TaskListPage() {
   const { tasks, refreshTasks, setPage, setCurrentTaskId } = useAppStore()
   const [processingStartTime, setProcessingStartTime] = useState(Date.now())
   const [selectedModel, setSelectedModel] = useState('qwen3-asr')
   const [availableModels, setAvailableModels] = useState<Array<{ id: string; name: string; available: boolean }>>([])
+  const [addErrors, setAddErrors] = useState<string[]>([])
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     refreshTasks()
-    // 加载可用模型
-    window.electronAPI.getAvailableModels().then(models => {
+    Promise.all([
+      window.electronAPI.getAvailableModels(),
+      window.electronAPI.getSettings(),
+    ]).then(([models, settings]) => {
       setAvailableModels(models)
-      // 默认选择第一个可用模型
-      const firstAvailable = models.find(m => m.available)
-      if (firstAvailable) setSelectedModel(firstAvailable.id)
+      const defaultModel = settings.defaultModel || models.find(m => m.available)?.id || 'qwen3-asr'
+      setSelectedModel(defaultModel)
     })
-    // 初始化时获取当前处理中任务的 startTime
     window.electronAPI.getCurrentTaskInfo().then(info => {
       if (info.startTime) setProcessingStartTime(info.startTime)
     })
@@ -48,7 +36,9 @@ export default function TaskListPage() {
     return () => { unsub() }
   }, [refreshTasks])
 
-  const [addErrors, setAddErrors] = useState<string[]>([])
+  const handleSettingsChange = useCallback((settings: Record<string, any>) => {
+    if (settings.defaultModel) setSelectedModel(settings.defaultModel)
+  }, [])
 
   const handleAddFiles = useCallback(async () => {
     setAddErrors([])
@@ -92,144 +82,38 @@ export default function TaskListPage() {
     setPage('taskDetail')
   }, [setCurrentTaskId, setPage])
 
-  const active = tasks.filter(t => t.status === 'pending' || t.status === 'processing')
-  const completed = tasks.filter(t => t.status === 'completed')
-  const stopped = tasks.filter(t => t.status === 'stopped')
-  const failed = tasks.filter(t => t.status === 'failed')
-
   return (
-    <div className="min-h-screen flex flex-col p-6" onDragOver={e => e.preventDefault()} onDrop={handleDrop}>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold text-gray-800">语音转写助手</h1>
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedModel}
-            onChange={e => setSelectedModel(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white text-gray-700"
-          >
-            {availableModels.filter(m => m.available).map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
-          <button onClick={handleAddFiles} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">
-            <Plus className="w-4 h-4" />添加文件
-          </button>
-        </div>
+    <div
+      style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, minHeight: '100vh' }}
+      onDragOver={e => e.preventDefault()}
+      onDrop={handleDrop}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Title level={4} style={{ margin: 0 }}>语音转写助手</Title>
+        <Button type="text" icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)} />
       </div>
 
       {addErrors.length > 0 && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-700">{addErrors.join('；')}</p>
-        </div>
+        <Alert type="error" message={addErrors.join('；')} closable onClose={() => setAddErrors([])} />
       )}
 
-      {tasks.length === 0 && (
-        <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-          <FileAudio className="w-16 h-16 mb-4" />
-          <p className="text-lg mb-2">暂无任务</p>
-          <p className="text-sm">点击"添加文件"或拖放音频/视频文件开始</p>
-        </div>
-      )}
+      <FeatureCards onUpload={handleAddFiles} />
 
-      {active.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-medium text-gray-500 mb-3">进行中</h2>
-          <div className="space-y-2">
-            {active.map(task => (
-              <div key={task.id} className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                {task.status === 'processing'
-                  ? <Loader2 className="w-5 h-5 text-blue-600 animate-spin shrink-0" />
-                  : <Clock className="w-5 h-5 text-gray-400 shrink-0" />}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">{task.fileName}</p>
-                  <p className="text-xs text-gray-500">
-                    {task.status === 'processing'
-                      ? <>语音识别中 · <ProcessingTimer startTime={processingStartTime} /></>
-                      : '排队中'}
-                  </p>
-                </div>
-                <button onClick={e => handleCancel(e, task.id)} className="p-1 text-gray-400 hover:text-orange-500 transition-colors" title="取消">
-                  <X className="w-4 h-4" />
-                </button>
-                <button onClick={e => handleDelete(e, task.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="删除">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <TaskTable
+        tasks={tasks}
+        processingStartTime={processingStartTime}
+        onViewDetail={handleViewDetail}
+        onDelete={handleDelete}
+        onRestart={handleRestart}
+        onCancel={handleCancel}
+      />
 
-      {/* 已停止 */}
-      {stopped.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-medium text-gray-500 mb-3">已停止</h2>
-          <div className="space-y-2">
-            {stopped.map(task => (
-              <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                <StopCircle className="w-5 h-5 text-gray-400 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">{task.fileName}</p>
-                  <p className="text-xs text-gray-500">已停止</p>
-                </div>
-                <button onClick={e => handleRestart(e, task.id)} className="p-1 text-gray-400 hover:text-blue-500 transition-colors" title="重新开始">
-                  <Play className="w-4 h-4" />
-                </button>
-                <button onClick={e => handleDelete(e, task.id)} className="p-1 text-gray-400 hover:text-red-500 transition-colors" title="删除">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {completed.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-medium text-gray-500 mb-3">已完成</h2>
-          <div className="space-y-2">
-            {completed.map(task => (
-              <div key={task.id} onClick={() => handleViewDetail(task)} className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                <CheckCircle className="w-5 h-5 text-green-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">{task.fileName}</p>
-                  <p className="text-xs text-gray-500">
-                    {task.wordCount ? `${task.wordCount} 字` : ''}
-                    {task.processingTime ? ` · 耗时 ${formatDuration(task.processingTime)}` : ''}
-                    {task.completedAt ? ` · ${formatDate(task.completedAt)}` : ''}
-                  </p>
-                </div>
-                <button onClick={e => handleDelete(e, task.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {failed.length > 0 && (
-        <div>
-          <h2 className="text-sm font-medium text-gray-500 mb-3">失败</h2>
-          <div className="space-y-2">
-            {failed.map(task => (
-              <div key={task.id} className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <XCircle className="w-5 h-5 text-red-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">{task.fileName}</p>
-                  <p className="text-xs text-red-600 truncate">{task.error || '未知错误'}</p>
-                </div>
-                <button onClick={e => handleRestart(e, task.id)} className="p-1 text-gray-400 hover:text-blue-500 transition-colors" title="重新开始">
-                  <Play className="w-4 h-4" />
-                </button>
-                <button onClick={e => handleDelete(e, task.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        availableModels={availableModels}
+        onSettingsChange={handleSettingsChange}
+      />
     </div>
   )
 }

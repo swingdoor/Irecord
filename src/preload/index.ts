@@ -47,6 +47,42 @@ const electronAPI = {
     ipcRenderer.on('task-progress', handler)
     return () => ipcRenderer.removeListener('task-progress', handler)
   },
+
+  getSettings: (): Promise<Record<string, any>> =>
+    ipcRenderer.invoke('get-settings'),
+
+  saveSettings: (settings: Record<string, any>): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('save-settings', settings),
+
+  getFileUrl: (filePath: string): Promise<{ url?: string; error?: string }> =>
+    ipcRenderer.invoke('get-file-url', filePath),
+
+  readFileBuffer: (filePath: string): Promise<{ base64?: string; error?: string }> =>
+    ipcRenderer.invoke('read-file-buffer', filePath),
+
+  convertForPlayback: (filePath: string): Promise<{ url?: string; error?: string }> =>
+    ipcRenderer.invoke('convert-for-playback', filePath),
+
+  diagnoseAudio: (filePath: string): Promise<{ info?: any; error?: string }> =>
+    ipcRenderer.invoke('diagnose-audio', filePath),
+
+  selectFolder: (): Promise<{ path?: string; canceled?: boolean }> =>
+    ipcRenderer.invoke('select-folder'),
+
+  llmAnalyze: (params: {
+    type: 'summary' | 'speakers' | 'minutes' | 'qa' | 'ask'
+    text: string
+    segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
+    question?: string
+  }): Promise<{ result?: string; error?: string }> =>
+    ipcRenderer.invoke('llm-analyze', params),
+
+  updateAiAnalysis: (params: {
+    taskId: string
+    field: 'aiSummary' | 'aiSpeakers' | 'aiMinutes' | 'aiQa'
+    value: string
+  }): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('update-ai-analysis', params),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

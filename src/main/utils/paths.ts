@@ -1,6 +1,14 @@
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
+
+function loadSettings(): Record<string, any> {
+  try {
+    const p = join(app.getPath('userData'), 'settings.json')
+    if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf-8'))
+  } catch { /* ignore */ }
+  return {}
+}
 
 /**
  * 获取资源文件路径
@@ -9,19 +17,43 @@ import { existsSync } from 'fs'
  */
 export function getResourcePath(...paths: string[]): string {
   if (app.isPackaged) {
-    // 打包后：resources 目录在 app.asar.unpacked 中
     return join(process.resourcesPath, 'resources', ...paths)
   } else {
-    // 开发模式：resources 目录在项目根目录
     return join(__dirname, '../../resources', ...paths)
   }
 }
 
 /**
- * 获取模型目录路径
+ * 获取模型目录路径（优先使用用户配置）
  */
 export function getModelsPath(): string {
+  const settings = loadSettings()
+  if (settings.modelDir && existsSync(settings.modelDir)) {
+    return settings.modelDir
+  }
   return getResourcePath('models')
+}
+
+/**
+ * 获取 ffmpeg 路径（优先使用用户配置）
+ */
+export function getFfmpegPath(): string {
+  const settings = loadSettings()
+  if (settings.ffmpegDir && existsSync(join(settings.ffmpegDir, 'ffmpeg.exe'))) {
+    return join(settings.ffmpegDir, 'ffmpeg.exe')
+  }
+  return getResourcePath('ffmpeg', 'ffmpeg.exe')
+}
+
+/**
+ * 获取 ffprobe 路径（优先使用用户配置）
+ */
+export function getFfprobePath(): string {
+  const settings = loadSettings()
+  if (settings.ffmpegDir && existsSync(join(settings.ffmpegDir, 'ffprobe.exe'))) {
+    return join(settings.ffmpegDir, 'ffprobe.exe')
+  }
+  return getResourcePath('ffmpeg', 'ffprobe.exe')
 }
 
 /**
@@ -107,20 +139,6 @@ export function getEmbeddingModelPath(): string {
  */
 export function checkDiarizationModelsExist(): boolean {
   return existsSync(getSegmentationModelPath()) && existsSync(getEmbeddingModelPath())
-}
-
-/**
- * 获取 FFmpeg 可执行文件路径
- */
-export function getFfmpegPath(): string {
-  return getResourcePath('ffmpeg', 'ffmpeg.exe')
-}
-
-/**
- * 获取 FFprobe 可执行文件路径
- */
-export function getFfprobePath(): string {
-  return getResourcePath('ffmpeg', 'ffprobe.exe')
 }
 
 /**

@@ -24,6 +24,8 @@
     "vite": "^7.3.2"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.1.1",
+    "antd": "^6.3.6",
     "fluent-ffmpeg": "^2.1.3",
     "lucide-react": "^1.8.0",
     "nodejieba": "^3.5.8",
@@ -31,6 +33,7 @@
     "react-dom": "^19.2.5",
     "sherpa-onnx-node": "^1.12.38",
     "sql.js": "^1.14.1",
+    "wavesurfer.js": "^7.12.6",
     "zustand": "^5.0.12"
   }
 }

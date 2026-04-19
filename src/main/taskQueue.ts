@@ -2,14 +2,19 @@ import { BrowserWindow, app } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import { join } from 'path'
 import { cpus } from 'os'
-import { getNextPendingTask, hasProcessingTask, updateTask, saveResult } from './db/database'
+import { getNextPendingTask, hasProcessingTask, updateTask, saveResult, updateResultAnalysis } from './db/database'
 import { getQwen3AsrModelPath, getSenseVoiceModelPath, getVadModelPath, getSegmentationModelPath, getEmbeddingModelPath } from './utils/paths'
 import { convertToWav, needsConversion } from './audio/ffmpeg'
 import { deleteTempFile } from './audio/temp'
+import { callLLM } from './llm/dashscope'
+import { getSummaryPrompt, getSpeakersPrompt, getMinutesPrompt, getQaPrompt } from './llm/prompts'
+import { existsSync, readFileSync } from 'fs'
+import { join } from 'path'
 
 let currentProcess: ChildProcess | null = null
 let currentTaskId: string | null = null
 let taskStartTime: number = 0
+let canceledFlag = false
 
 export function startQueue(win: BrowserWindow) {
   processNext(win)
@@ -23,6 +28,7 @@ async function processNext(win: BrowserWindow) {
 
   currentTaskId = task.id
   taskStartTime = Date.now()
+  canceledFlag = false
 
   await updateTask(task.id, { status: 'processing', processingTime: null })
   notifyTaskChanged(win, task.id)
@@ -124,20 +130,26 @@ async function processNext(win: BrowserWindow) {
     currentTaskId = null
     notifyTaskChanged(win, task.id)
 
+    // 异步触发 AI 分析（不阻塞队列）
+    triggerAiAnalysis(task.id, result.text, result.segments).catch(() => {})
+
     // 处理下一个
     processNext(win)
   } catch (err: any) {
     if (tempWavPath) { deleteTempFile(tempWavPath) }
 
-    await updateTask(task.id, {
-      status: 'failed',
-      error: err.message,
-      completedAt: new Date().toISOString(),
-    })
+    // 主动取消时 cancelCurrentTask 已设置 stopped，不再覆盖为 failed
+    if (!canceledFlag) {
+      await updateTask(task.id, {
+        status: 'failed',
+        error: err.message,
+        completedAt: new Date().toISOString(),
+      })
 
-    currentProcess = null
-    currentTaskId = null
-    notifyTaskChanged(win, task.id)
+      currentProcess = null
+      currentTaskId = null
+      notifyTaskChanged(win, task.id)
+    }
 
     // 继续处理下一个
     processNext(win)
@@ -150,6 +162,7 @@ function notifyTaskChanged(win: BrowserWindow, taskId: string) {
 
 export async function cancelCurrentTask(win: BrowserWindow) {
   if (currentProcess) {
+    canceledFlag = true
     currentProcess.kill()
     currentProcess = null
   }
@@ -182,4 +195,42 @@ export async function shutdownQueue() {
     await updateTask(currentTaskId, { status: 'pending' })
     currentTaskId = null
   }
+}
+
+/**
+ * 识别完成后异步触发 4 个 AI 分析，结果写入数据库
+ */
+async function triggerAiAnalysis(
+  taskId: string,
+  text: string,
+  segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
+) {
+  const settingsPath = join(app.getPath('userData'), 'settings.json')
+  let settings: any = {}
+  try {
+    if (existsSync(settingsPath)) {
+      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    }
+  } catch { /* ignore */ }
+
+  if (!settings.llmApiKey) return // 未配置 API Key，跳过
+
+  const analyses = [
+    { field: 'aiSummary', prompt: getSummaryPrompt(text) },
+    { field: 'aiSpeakers', prompt: getSpeakersPrompt(text, segments) },
+    { field: 'aiMinutes', prompt: getMinutesPrompt(text) },
+    { field: 'aiQa', prompt: getQaPrompt(text) },
+  ]
+
+  // 并行执行 4 个分析
+  await Promise.allSettled(
+    analyses.map(async ({ field, prompt }) => {
+      try {
+        const result = await callLLM(settings, prompt.system, prompt.user)
+        await updateResultAnalysis(taskId, field, result)
+      } catch (err: any) {
+        console.error(`AI analysis [${field}] failed:`, err.message)
+      }
+    })
+  )
 }

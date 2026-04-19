@@ -79,9 +79,19 @@ async function getDb(): Promise<SqlJsDatabase> {
       speakerStats TEXT,
       keywords TEXT,
       lang TEXT,
-      strategy TEXT
+      strategy TEXT,
+      aiSummary TEXT,
+      aiSpeakers TEXT,
+      aiMinutes TEXT,
+      aiQa TEXT
     )
   `)
+
+  // 迁移：为旧 results 表添加 AI 分析列
+  const aiCols = ['aiSummary', 'aiSpeakers', 'aiMinutes', 'aiQa']
+  for (const col of aiCols) {
+    try { db.run(`ALTER TABLE results ADD COLUMN ${col} TEXT`) } catch { /* already exists */ }
+  }
 
   return db
 }
@@ -202,6 +212,14 @@ export async function saveResult(taskId: string, result: {
 export async function getResult(taskId: string): Promise<TaskResult | undefined> {
   const d = await getDb()
   return queryOne(d, 'SELECT * FROM results WHERE taskId = ?', [taskId])
+}
+
+export async function updateResultAnalysis(taskId: string, field: string, value: string) {
+  const d = await getDb()
+  const allowed = ['aiSummary', 'aiSpeakers', 'aiMinutes', 'aiQa']
+  if (!allowed.includes(field)) return
+  d.run(`UPDATE results SET ${field} = ? WHERE taskId = ?`, [value, taskId])
+  saveDb()
 }
 
 export async function getNextPendingTask(): Promise<Task | undefined> {

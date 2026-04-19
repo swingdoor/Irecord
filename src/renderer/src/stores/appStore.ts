@@ -25,6 +25,10 @@ export interface TaskResultData {
   keywords?: Array<{ word: string; score: number }>
   lang: string
   strategy?: string
+  aiSummary?: string | null
+  aiSpeakers?: string | null
+  aiMinutes?: string | null
+  aiQa?: string | null
 }
 
 interface AppState {
