@@ -21,6 +21,7 @@ export interface RecognitionResult {
   text: string
   segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
   speakerStats?: Record<string, { segments: number; duration: number }>
+  keywords?: Array<{ word: string; score: number }>
   lang: string
   strategy?: 'speaker-diarization' | 'vad' | 'plain'
   error?: string
@@ -46,6 +47,7 @@ const electronAPI = {
     text: string
     includeTimestamps: boolean
     segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
+    keywords?: Array<{ word: string; score: number }>
   }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('export-txt', options),
 

@@ -130,6 +130,7 @@ export function registerIpcHandlers(): void {
                   text: msg.text,
                   segments: msg.segments,
                   speakerStats: msg.speakerStats,
+                  keywords: msg.keywords,
                   lang: msg.lang,
                   strategy: msg.strategy,
                 })
@@ -175,6 +176,7 @@ export function registerIpcHandlers(): void {
     text: string
     includeTimestamps: boolean
     segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
+    keywords?: Array<{ word: string; score: number }>
   }) => {
     const result = await dialog.showSaveDialog({
       title: '导出转写结果',
@@ -187,8 +189,13 @@ export function registerIpcHandlers(): void {
     try {
       let content = ''
 
+      // 关键词摘要
+      if (options.keywords?.length) {
+        content += '关键词：' + options.keywords.map(k => k.word).join('、') + '\n\n'
+      }
+
       if (options.includeTimestamps && options.segments?.length) {
-        content = options.segments
+        content += options.segments
           .map(seg => {
             const time = `[${formatTimestamp(seg.start)} - ${formatTimestamp(seg.end)}]`
             const speaker = seg.speaker ? ` ${seg.speaker}:` : ''
@@ -196,7 +203,7 @@ export function registerIpcHandlers(): void {
           })
           .join('\n')
       } else {
-        content = options.text
+        content += options.text
       }
 
       await writeFile(result.filePath, content, 'utf-8')

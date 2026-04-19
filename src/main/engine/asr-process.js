@@ -8,6 +8,7 @@
 const sherpa = require('sherpa-onnx-node');
 const path = require('path');
 const fs = require('fs');
+const { extractKeywords } = require('../keywords/extract.js');
 
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n');
@@ -209,7 +210,7 @@ function runWithDiarization(args) {
   const fullText = mergedForDisplay.map(s => s.text).join('\n');
 
   send({ type: 'progress', stage: 'done', percent: 100 });
-  send({ type: 'result', text: fullText, segments: mergedForDisplay, speakerStats, lang: 'zh', strategy: 'speaker-diarization' });
+  send({ type: 'result', text: fullText, segments: mergedForDisplay, speakerStats, keywords: extractKeywords(fullText), lang: 'zh', strategy: 'speaker-diarization' });
 }
 
 // ========== 策略 2: VAD 分段 ==========
@@ -279,7 +280,7 @@ function runWithVAD(args) {
   const fullText = segments.map(s => s.text).join('\n');
 
   send({ type: 'progress', stage: 'done', percent: 100 });
-  send({ type: 'result', text: fullText, segments, lang: 'zh', strategy: 'vad' });
+  send({ type: 'result', text: fullText, segments, keywords: extractKeywords(fullText), lang: 'zh', strategy: 'vad' });
 }
 
 // ========== 策略 3: 整体识别 ==========
@@ -296,11 +297,12 @@ function runPlain(args) {
   const wave = sherpa.readWave(wavPath);
   const result = recognizeWave(recognizer, wave.samples, wave.sampleRate);
 
+  const text = String(result.text || '');
   send({ type: 'progress', stage: 'done', percent: 100 });
   send({
     type: 'result',
-    text: String(result.text || ''),
-    tokens: Array.from(result.tokens || []).map(t => String(t)),
+    text,
+    keywords: extractKeywords(text),
     lang: String(result.lang || 'zh'),
     strategy: 'plain',
   });

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { ArrowLeft, Copy, Download, Check } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 
@@ -45,13 +45,45 @@ function getStrategyLabel(strategy?: string): string {
   }
 }
 
+// 高亮文本中的关键词
+function HighlightText({ text, keyword }: { text: string; keyword: string | null }) {
+  if (!keyword) return <>{text}</>
+
+  const parts: Array<{ text: string; highlight: boolean }> = []
+  let remaining = text
+  const lowerKeyword = keyword.toLowerCase()
+
+  while (remaining.length > 0) {
+    const idx = remaining.toLowerCase().indexOf(lowerKeyword)
+    if (idx === -1) {
+      parts.push({ text: remaining, highlight: false })
+      break
+    }
+    if (idx > 0) parts.push({ text: remaining.slice(0, idx), highlight: false })
+    parts.push({ text: remaining.slice(idx, idx + keyword.length), highlight: true })
+    remaining = remaining.slice(idx + keyword.length)
+  }
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.highlight
+          ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded px-0.5">{part.text}</mark>
+          : <span key={i}>{part.text}</span>
+      )}
+    </>
+  )
+}
+
 export default function ResultPage() {
   const { fileInfo, result, processing, reset } = useAppStore()
   const [copied, setCopied] = useState(false)
   const [showTimestamps, setShowTimestamps] = useState(true)
+  const [activeKeyword, setActiveKeyword] = useState<string | null>(null)
 
   const hasTimestamps = !!(result?.segments && result.segments.length > 0)
   const hasSpeakers = hasTimestamps && result!.segments!.some(s => s.speaker)
+  const hasKeywords = !!(result?.keywords && result.keywords.length > 0)
   const speakerList = hasSpeakers
     ? [...new Set(result!.segments!.map(s => s.speaker).filter(Boolean) as string[])]
     : []
@@ -69,6 +101,7 @@ export default function ResultPage() {
       text: result.text,
       includeTimestamps: hasTimestamps && showTimestamps,
       segments: result.segments,
+      keywords: result.keywords,
     })
     if (res.error) alert(res.error)
   }, [result, hasTimestamps, showTimestamps])
@@ -140,6 +173,34 @@ export default function ResultPage() {
         </div>
       )}
 
+      {/* 关键词 */}
+      {hasKeywords && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          <span className="text-xs text-gray-400 leading-6">关键词</span>
+          {result.keywords!.map((kw) => (
+            <button
+              key={kw.word}
+              onClick={() => setActiveKeyword(activeKeyword === kw.word ? null : kw.word)}
+              className={`px-2.5 py-0.5 text-sm rounded-full border transition-colors cursor-pointer ${
+                activeKeyword === kw.word
+                  ? 'bg-yellow-100 border-yellow-300 text-yellow-800'
+                  : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {kw.word}
+            </button>
+          ))}
+          {activeKeyword && (
+            <button
+              onClick={() => setActiveKeyword(null)}
+              className="px-2 py-0.5 text-xs text-gray-400 hover:text-gray-600"
+            >
+              清除高亮
+            </button>
+          )}
+        </div>
+      )}
+
       {/* 转写文本 */}
       <div className="flex-1 bg-white border border-gray-200 rounded-lg p-6 overflow-auto">
         {hasTimestamps && showTimestamps ? (
@@ -156,14 +217,16 @@ export default function ResultPage() {
                       <p className="text-xs font-medium mt-0.5">{seg.speaker}</p>
                     )}
                   </div>
-                  <p className="text-sm leading-relaxed select-text flex-1">{seg.text}</p>
+                  <p className="text-sm leading-relaxed select-text flex-1">
+                    <HighlightText text={seg.text} keyword={activeKeyword} />
+                  </p>
                 </div>
               )
             })}
           </div>
         ) : (
           <pre className="whitespace-pre-wrap text-gray-800 text-sm leading-relaxed font-sans select-text">
-            {result.text}
+            <HighlightText text={result.text} keyword={activeKeyword} />
           </pre>
         )}
       </div>

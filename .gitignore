@@ -5,6 +5,8 @@ dist/
 resources/models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/
 resources/models/sherpa-onnx-funasr-nano-int8-2025-12-30/
 resources/models/silero-vad/silero_vad.onnx
+resources/models/speaker-diarization/*.onnx
+resources/models/speaker-diarization/*.onnx
 *.tar.bz2
 
 # FFmpeg 二进制

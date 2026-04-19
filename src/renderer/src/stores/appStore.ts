@@ -24,6 +24,7 @@ export interface RecognitionResult {
   text: string
   segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
   speakerStats?: Record<string, { segments: number; duration: number }>
+  keywords?: Array<{ word: string; score: number }>
   lang: string
   strategy?: 'speaker-diarization' | 'vad' | 'plain'
 }

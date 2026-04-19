@@ -26,6 +26,7 @@
   "dependencies": {
     "fluent-ffmpeg": "^2.1.3",
     "lucide-react": "^1.8.0",
+    "nodejieba": "^3.5.8",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "sherpa-onnx-node": "^1.12.38",
