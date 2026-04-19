@@ -1,7 +1,6 @@
 import { extname } from 'path'
 import { getAudioInfo } from './ffmpeg'
-
-const MAX_DURATION_SECONDS = 7200 // 2 小时
+import { getAsrParams } from '../utils/settings'
 
 const SUPPORTED_AUDIO_EXTENSIONS = new Set([
   '.wav', '.mp3', '.flac', '.aac', '.m4a', '.ogg'
@@ -68,14 +67,16 @@ export async function validateFile(filePath: string): Promise<FileValidation> {
   // 获取音频信息
   try {
     const info = await getAudioInfo(filePath)
+    const { maxDurationSeconds } = getAsrParams()
 
     // 检查时长
-    if (info.duration > MAX_DURATION_SECONDS) {
+    if (info.duration > maxDurationSeconds) {
       const hours = Math.floor(info.duration / 3600)
       const minutes = Math.ceil((info.duration % 3600) / 60)
+      const maxHours = Math.floor(maxDurationSeconds / 3600)
       return {
         valid: false,
-        error: `音频时长超过 2 小时（当前 ${hours}小时${minutes}分钟）`,
+        error: `音频时长超过 ${maxHours} 小时（当前 ${hours}小时${minutes}分钟）`,
         isVideo,
         duration: info.duration
       }

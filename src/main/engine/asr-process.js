@@ -23,7 +23,7 @@ function formatTimestamp(sec) {
 
 // ========== ASR 引擎 ==========
 
-function createRecognizer(modelDir, modelType, numThreads) {
+function createRecognizer(modelDir, modelType, numThreads, asrParams = {}) {
   if (modelType === 'sensevoice-small') {
     return new sherpa.OfflineRecognizer({
       modelConfig: {
@@ -59,8 +59,8 @@ function createRecognizer(modelDir, modelType, numThreads) {
         encoder: path.join(modelDir, encoderFile),
         decoder: path.join(modelDir, decoderFile),
         tokenizer: tokenizerDir ? path.join(modelDir, tokenizerDir) : '',
-        maxTotalLen: 4096,
-        maxNewTokens: 1024,
+        maxTotalLen: asrParams.qwen3MaxTotalLen || 4096,
+        maxNewTokens: asrParams.qwen3MaxNewTokens || 1024,
       },
       tokens: '',
       numThreads,
@@ -79,8 +79,12 @@ function recognizeWave(recognizer, samples, sampleRate) {
 }
 
 // 后处理说话人分离结果
-function postProcessSegments(segments) {
+function postProcessSegments(segments, asrParams = {}) {
   if (segments.length === 0) return [];
+
+  const TRIMMED_MIN = asrParams.trimmedMinDuration || 0.5;
+  const MERGE_GAP = asrParams.sameSpeakerMergeGap || 2.0;
+  const MAX_DURATION = asrParams.maxSegmentDuration || 30.0;
 
   // 1. 按开始时间排序
   const sorted = segments.slice().sort((a, b) => a.start - b.start);
@@ -96,20 +100,20 @@ function postProcessSegments(segments) {
       prev.end = curr.start;
     }
 
-    // 如果前段被裁剪后太短（< 0.5s），移除
-    if (prev.end - prev.start < 0.5) {
+    // 如果前段被裁剪后太短，移除
+    if (prev.end - prev.start < TRIMMED_MIN) {
       trimmed.pop();
     }
 
     trimmed.push(curr);
   }
 
-  // 3. 先合并相邻同说话人段（间隔 < 2 秒，不限长度）
+  // 3. 先合并相邻同说话人段（间隔 < MERGE_GAP，不限长度）
   const merged = [trimmed[0]];
   for (let i = 1; i < trimmed.length; i++) {
     const prev = merged[merged.length - 1];
     const curr = trimmed[i];
-    if (curr.speaker === prev.speaker && curr.start - prev.end < 2.0) {
+    if (curr.speaker === prev.speaker && curr.start - prev.end < MERGE_GAP) {
       merged[merged.length - 1] = { ...prev, end: curr.end };
     } else {
       merged.push(curr);
@@ -117,7 +121,6 @@ function postProcessSegments(segments) {
   }
 
   // 4. 超长段强制切分（保留 speaker），切分后不再合并
-  const MAX_DURATION = 30.0;
   const result = [];
   for (const seg of merged) {
     const dur = seg.end - seg.start;
@@ -140,6 +143,7 @@ function postProcessSegments(segments) {
 
 function runWithDiarization(args) {
   const { wavPath, modelDir, modelType, segmentationModelPath, embeddingModelPath, numThreads } = args;
+  const asrParams = args.asrParams || {};
 
   send({ type: 'progress', stage: 'initializing', percent: 10 });
 
@@ -155,13 +159,13 @@ function runWithDiarization(args) {
       debug: 0,
     },
     clustering: {
-      threshold: 0.85, // 提高阈值，减少误判说话人数量
+      threshold: asrParams.clusteringThreshold || 0.85,
     },
-    minDurationOn: 1.0,  // 最短语音段 1 秒，过滤碎片
-    minDurationOff: 1.0, // 最短静音 1 秒，避免过度切分
+    minDurationOn: asrParams.minDurationOn || 1.0,
+    minDurationOff: asrParams.minDurationOff || 1.0,
   });
 
-  const recognizer = createRecognizer(modelDir, modelType, numThreads);
+  const recognizer = createRecognizer(modelDir, modelType, numThreads, asrParams);
 
   send({ type: 'progress', stage: 'segmenting', percent: 20 });
 
@@ -169,12 +173,13 @@ function runWithDiarization(args) {
   const sdResult = sd.process(wave.samples);
 
   // 后处理：过滤重叠、切分超长段、合并相邻同说话人段
-  const processed = postProcessSegments(sdResult);
+  const processed = postProcessSegments(sdResult, asrParams);
 
   send({ type: 'progress', stage: 'recognizing', percent: 40 });
 
   const segments = [];
   const speakerStats = {};
+  const minSampleLength = asrParams.minSampleLength || 1600;
 
   for (let i = 0; i < processed.length; i++) {
     const seg = processed[i];
@@ -187,7 +192,7 @@ function runWithDiarization(args) {
     const endSample = Math.min(Math.floor(seg.end * wave.sampleRate), wave.samples.length);
     const segSamples = wave.samples.slice(startSample, endSample);
 
-    if (segSamples.length < 1600) continue; // 跳过太短的段
+    if (segSamples.length < minSampleLength) continue; // 跳过太短的段
 
     const result = recognizeWave(recognizer, segSamples, wave.sampleRate);
     const text = String(result.text || '').trim();
@@ -212,11 +217,12 @@ function runWithDiarization(args) {
 
   // 合并相邻同说话人段的文本和时间范围（用于最终显示）
   const mergedForDisplay = [];
+  const displayMergeGap = asrParams.displayMergeGap || 0.5;
   for (const seg of segments) {
     if (!seg.text.trim()) continue; // 跳过去重后变空的段
 
     const last = mergedForDisplay[mergedForDisplay.length - 1];
-    if (last && last.speaker === seg.speaker && seg.start - last.end < 0.5) {
+    if (last && last.speaker === seg.speaker && seg.start - last.end < displayMergeGap) {
       // 相邻同说话人段，合并文本和时间
       last.text += seg.text;
       last.end = seg.end;
@@ -235,22 +241,23 @@ function runWithDiarization(args) {
 
 function runWithVAD(args) {
   const { wavPath, modelDir, modelType, vadModelPath, numThreads } = args;
+  const asrParams = args.asrParams || {};
 
   send({ type: 'progress', stage: 'initializing', percent: 10 });
 
   const vad = new sherpa.Vad({
     sileroVad: {
       model: vadModelPath,
-      threshold: 0.5,
-      minSilenceDuration: 1.5, // 1.5 秒静音才切分，减少碎片
-      minSpeechDuration: 1.0,  // 最短语音段 1 秒
+      threshold: asrParams.vadThreshold || 0.5,
+      minSilenceDuration: asrParams.minSilenceDuration || 1.5,
+      minSpeechDuration: asrParams.minSpeechDuration || 1.0,
       windowSize: 512,
     },
     sampleRate: 16000,
     debug: 0,
   });
 
-  const recognizer = createRecognizer(modelDir, modelType, numThreads);
+  const recognizer = createRecognizer(modelDir, modelType, numThreads, asrParams);
 
   send({ type: 'progress', stage: 'segmenting', percent: 20 });
 
@@ -274,13 +281,14 @@ function runWithVAD(args) {
   send({ type: 'progress', stage: 'recognizing', percent: 40 });
 
   const segments = [];
+  const minSampleLength = asrParams.minSampleLength || 1600;
 
   for (let i = 0; i < speechSegments.length; i++) {
     const seg = speechSegments[i];
     const start = Math.round(seg.start * 100) / 100;
     const samples = seg.samples;
 
-    if (samples.length < 1600) continue;
+    if (samples.length < minSampleLength) continue;
 
     const duration = samples.length / 16000;
     const end = Math.round((seg.start + duration) * 100) / 100;
@@ -305,10 +313,11 @@ function runWithVAD(args) {
 
 function runPlain(args) {
   const { wavPath, modelDir, modelType, numThreads } = args;
+  const asrParams = args.asrParams || {};
 
   send({ type: 'progress', stage: 'initializing', percent: 10 });
 
-  const recognizer = createRecognizer(modelDir, modelType, numThreads);
+  const recognizer = createRecognizer(modelDir, modelType, numThreads, asrParams);
 
   send({ type: 'progress', stage: 'recognizing', percent: 30 });
 

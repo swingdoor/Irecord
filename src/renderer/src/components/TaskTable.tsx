@@ -45,29 +45,64 @@ function ProcessingTimer({ startTime }: { startTime: number }) {
   return <Text type="secondary" style={{ fontSize: 12 }}>{formatDuration(elapsed)}</Text>
 }
 
-function StatusTag({ status }: { status: string }) {
-  const map: Record<string, { color: string; text: string }> = {
-    processing: { color: 'processing', text: '处理中' },
-    pending: { color: 'default', text: '排队中' },
-    completed: { color: 'success', text: '已完成' },
-    failed: { color: 'error', text: '失败' },
-    stopped: { color: 'warning', text: '已取消' },
+function StatusTag({ status, themeMode }: { status: string; themeMode: 'default' | 'monochrome' }) {
+  if (themeMode === 'default') {
+    // 默认主题：使用彩色
+    const colorMap: Record<string, string> = {
+      processing: 'processing',
+      pending: 'default',
+      completed: 'success',
+      failed: 'error',
+      stopped: 'warning',
+    }
+    const textMap: Record<string, string> = {
+      processing: '处理中',
+      pending: '排队中',
+      completed: '已完成',
+      failed: '失败',
+      stopped: '已取消',
+    }
+    return (
+      <Tag
+        color={colorMap[status] || 'default'}
+        icon={status === 'processing' ? <LoadingOutlined /> : undefined}
+      >
+        {textMap[status] || status}
+      </Tag>
+    )
   }
-  const { color, text } = map[status] || { color: 'default', text: status }
-  return <Tag color={color} icon={status === 'processing' ? <LoadingOutlined /> : undefined}>{text}</Tag>
+
+  // 黑白主题：使用黑白灰 + 白色文字
+  const map: Record<string, { color: string; text: string }> = {
+    processing: { color: '#18181b', text: '处理中' },
+    pending: { color: '#71717a', text: '排队中' },
+    completed: { color: '#27272a', text: '已完成' },
+    failed: { color: '#3f3f46', text: '失败' },
+    stopped: { color: '#52525b', text: '已取消' },
+  }
+  const { color, text } = map[status] || { color: '#71717a', text: status }
+  return (
+    <Tag
+      icon={status === 'processing' ? <LoadingOutlined /> : undefined}
+      style={{ backgroundColor: color, borderColor: color, color: '#fff' }}
+    >
+      {text}
+    </Tag>
+  )
 }
 
 
 interface TaskTableProps {
   tasks: Task[]
   processingStartTime: number
+  themeMode: 'default' | 'monochrome'
   onViewDetail: (task: Task) => void
   onDelete: (e: React.MouseEvent, id: string) => void
   onRestart: (e: React.MouseEvent, id: string) => void
   onCancel: (e: React.MouseEvent, id: string) => void
 }
 
-export function TaskTable({ tasks, processingStartTime, onViewDetail, onDelete, onRestart, onCancel }: TaskTableProps) {
+export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail, onDelete, onRestart, onCancel }: TaskTableProps) {
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
 
@@ -117,6 +152,7 @@ export function TaskTable({ tasks, processingStartTime, onViewDetail, onDelete, 
       title: '文件名称',
       dataIndex: 'fileName',
       key: 'fileName',
+      width: 280,
       ellipsis: true,
       render: (_: string, task: Task) => (
         <div>
@@ -127,16 +163,16 @@ export function TaskTable({ tasks, processingStartTime, onViewDetail, onDelete, 
         </div>
       ),
     },
-    { title: '时长', dataIndex: 'duration', key: 'duration', width: 90, render: (d: number) => formatDuration(d) },
-    { title: '字数', dataIndex: 'wordCount', key: 'wordCount', width: 90, render: (w: number | null) => w != null ? w.toLocaleString() : '-' },
-    { title: '耗时', dataIndex: 'processingTime', key: 'processingTime', width: 90, render: (t: number | null) => t != null ? formatDuration(t) : '-' },
-    { title: '模型', dataIndex: 'modelType', key: 'modelType', width: 120, render: (m: string) => getModelLabel(m) },
-    { title: '日期', dataIndex: 'createdAt', key: 'createdAt', width: 170, render: (d: string) => formatDate(d) },
+    { title: '时长', dataIndex: 'duration', key: 'duration', width: 80, render: (d: number) => formatDuration(d) },
+    { title: '字数', dataIndex: 'wordCount', key: 'wordCount', width: 80, render: (w: number | null) => w != null ? w.toLocaleString() : '-' },
+    { title: '耗时', dataIndex: 'processingTime', key: 'processingTime', width: 80, render: (t: number | null) => t != null ? formatDuration(t) : '-' },
+    { title: '模型', dataIndex: 'modelType', key: 'modelType', width: 110, render: (m: string) => getModelLabel(m) },
+    { title: '日期', dataIndex: 'createdAt', key: 'createdAt', width: 155, render: (d: string) => formatDate(d) },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: 130,
+      title: '状态', dataIndex: 'status', key: 'status', width: 120,
       render: (status: string) => (
         <Space size={4}>
-          <StatusTag status={status} />
+          <StatusTag status={status} themeMode={themeMode} />
           {status === 'processing' && <ProcessingTimer startTime={processingStartTime} />}
         </Space>
       ),
@@ -151,9 +187,19 @@ export function TaskTable({ tasks, processingStartTime, onViewDetail, onDelete, 
     },
   ]
 
-  // Card status ribbon color
-  const statusBorderColor: Record<string, string> = {
-    processing: '#1677ff', pending: '#d9d9d9', completed: '#52c41a', failed: '#ff4d4f', stopped: '#faad14',
+  // Card status border color
+  const statusBorderColor: Record<string, string> = themeMode === 'default' ? {
+    processing: '#1677ff',
+    pending: '#d9d9d9',
+    completed: '#52c41a',
+    failed: '#ff4d4f',
+    stopped: '#faad14',
+  } : {
+    processing: '#18181b',
+    pending: '#71717a',
+    completed: '#27272a',
+    failed: '#3f3f46',
+    stopped: '#52525b',
   }
 
   return (
@@ -201,14 +247,16 @@ export function TaskTable({ tasks, processingStartTime, onViewDetail, onDelete, 
               <Card
                 hoverable={task.status === 'completed'}
                 onClick={() => task.status === 'completed' && onViewDetail(task)}
-                style={{ borderTop: `3px solid ${statusBorderColor[task.status] || '#d9d9d9'}` }}
+                style={{
+                  border: `1px solid ${statusBorderColor[task.status] || '#d9d9d9'}`,
+                }}
                 styles={{ body: { padding: '16px 20px' } }}
               >
                 {/* Header: title + status + menu */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Text strong ellipsis style={{ fontSize: 14, flex: 1, minWidth: 0 }}>{task.fileName}</Text>
-                    <StatusTag status={task.status} />
+                    <StatusTag status={task.status} themeMode={themeMode} />
                     {task.status === 'processing' && <ProcessingTimer startTime={processingStartTime} />}
                   </div>
                   <Dropdown menu={{ items: getMenuItems(task), onClick: (e) => handleMenuClick(task, e.key, e) }} trigger={['click']}>

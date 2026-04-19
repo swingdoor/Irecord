@@ -6,6 +6,7 @@ import { cleanupOldTempFiles, cleanupTempFiles } from './audio/temp'
 import { registerIpcHandlers } from './ipc'
 import { closeDb, resetStaleTasks } from './db/database'
 import { shutdownQueue, startQueue } from './taskQueue'
+import { getResourcePath } from './utils/paths'
 
 Menu.setApplicationMenu(null)
 
@@ -17,13 +18,18 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, 'icon.ico')
+    : join(__dirname, '../../icon.ico')
+
   mainWindow = new BrowserWindow({
     autoHideMenuBar: true,
     width: 1200,
     height: 800,
     minWidth: 1000,
     minHeight: 700,
-    title: '语音转写助手',
+    title: '',
+    icon: iconPath,
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

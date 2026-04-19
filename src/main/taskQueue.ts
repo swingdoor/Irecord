@@ -8,8 +8,7 @@ import { convertToWav, needsConversion } from './audio/ffmpeg'
 import { deleteTempFile } from './audio/temp'
 import { callLLM } from './llm/dashscope'
 import { getSummaryPrompt, getSpeakersPrompt, getMinutesPrompt, getQaPrompt } from './llm/prompts'
-import { existsSync, readFileSync } from 'fs'
-import { join } from 'path'
+import { getSettings, getAsrParams } from './utils/settings'
 
 let currentProcess: ChildProcess | null = null
 let currentTaskId: string | null = null
@@ -61,6 +60,7 @@ async function processNext(win: BrowserWindow) {
       segmentationModelPath: getSegmentationModelPath(),
       embeddingModelPath: getEmbeddingModelPath(),
       numThreads: cpus().length,
+      asrParams: getAsrParams(),
     })
 
     const result = await new Promise<any>((resolve, reject) => {
@@ -205,13 +205,7 @@ async function triggerAiAnalysis(
   text: string,
   segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
 ) {
-  const settingsPath = join(app.getPath('userData'), 'settings.json')
-  let settings: any = {}
-  try {
-    if (existsSync(settingsPath)) {
-      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-    }
-  } catch { /* ignore */ }
+  const settings = getSettings()
 
   if (!settings.llmApiKey) return // 未配置 API Key，跳过
 

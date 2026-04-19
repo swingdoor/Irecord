@@ -1,14 +1,7 @@
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, readFileSync } from 'fs'
-
-function loadSettings(): Record<string, any> {
-  try {
-    const p = join(app.getPath('userData'), 'settings.json')
-    if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf-8'))
-  } catch { /* ignore */ }
-  return {}
-}
+import { existsSync } from 'fs'
+import { getSettings } from './settings'
 
 /**
  * 获取资源文件路径
@@ -27,7 +20,7 @@ export function getResourcePath(...paths: string[]): string {
  * 获取模型目录路径（优先使用用户配置）
  */
 export function getModelsPath(): string {
-  const settings = loadSettings()
+  const settings = getSettings()
   if (settings.modelDir && existsSync(settings.modelDir)) {
     return settings.modelDir
   }
@@ -38,7 +31,7 @@ export function getModelsPath(): string {
  * 获取 ffmpeg 路径（优先使用用户配置）
  */
 export function getFfmpegPath(): string {
-  const settings = loadSettings()
+  const settings = getSettings()
   if (settings.ffmpegDir && existsSync(join(settings.ffmpegDir, 'ffmpeg.exe'))) {
     return join(settings.ffmpegDir, 'ffmpeg.exe')
   }
@@ -49,7 +42,7 @@ export function getFfmpegPath(): string {
  * 获取 ffprobe 路径（优先使用用户配置）
  */
 export function getFfprobePath(): string {
-  const settings = loadSettings()
+  const settings = getSettings()
   if (settings.ffmpegDir && existsSync(join(settings.ffmpegDir, 'ffprobe.exe'))) {
     return join(settings.ffmpegDir, 'ffprobe.exe')
   }

@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState } from 'react'
-import { Typography, Alert, Button } from 'antd'
-import { SettingOutlined } from '@ant-design/icons'
+import { Typography, Alert, Button, Segmented, Space } from 'antd'
+import { BgColorsOutlined, SettingOutlined } from '@ant-design/icons'
 import { useAppStore, Task } from '../stores/appStore'
 import { FeatureCards } from '../components/FeatureCards'
 import { TaskTable } from '../components/TaskTable'
@@ -8,7 +8,12 @@ import { SettingsModal } from '../components/SettingsModal'
 
 const { Title } = Typography
 
-export default function TaskListPage() {
+interface TaskListPageProps {
+  themeMode: 'default' | 'monochrome'
+  onThemeChange: (mode: 'default' | 'monochrome') => void
+}
+
+export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageProps) {
   const { tasks, refreshTasks, setPage, setCurrentTaskId } = useAppStore()
   const [processingStartTime, setProcessingStartTime] = useState(Date.now())
   const [selectedModel, setSelectedModel] = useState('qwen3-asr')
@@ -39,6 +44,12 @@ export default function TaskListPage() {
   const handleSettingsChange = useCallback((settings: Record<string, any>) => {
     if (settings.defaultModel) setSelectedModel(settings.defaultModel)
   }, [])
+
+  const handleThemeChange = useCallback(async (mode: 'default' | 'monochrome') => {
+    onThemeChange(mode)
+    const settings = await window.electronAPI.getSettings()
+    await window.electronAPI.saveSettings({ ...settings, themeMode: mode })
+  }, [onThemeChange])
 
   const handleAddFiles = useCallback(async () => {
     setAddErrors([])
@@ -89,8 +100,18 @@ export default function TaskListPage() {
       onDrop={handleDrop}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={4} style={{ margin: 0 }}>语音转写助手</Title>
-        <Button type="text" icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)} />
+        <Title level={3} style={{ margin: 0 }}>你说我记</Title>
+        <Space>
+          <Segmented
+            value={themeMode}
+            onChange={handleThemeChange}
+            options={[
+              { label: '默认', value: 'default', icon: <BgColorsOutlined /> },
+              { label: '黑白', value: 'monochrome' },
+            ]}
+          />
+          <Button type="text" icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)} />
+        </Space>
       </div>
 
       {addErrors.length > 0 && (
@@ -102,6 +123,7 @@ export default function TaskListPage() {
       <TaskTable
         tasks={tasks}
         processingStartTime={processingStartTime}
+        themeMode={themeMode}
         onViewDetail={handleViewDetail}
         onDelete={handleDelete}
         onRestart={handleRestart}

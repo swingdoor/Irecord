@@ -1,15 +1,15 @@
 import { app, ipcMain, dialog, BrowserWindow } from 'electron'
-import { convertToWav } from './audio/ffmpeg'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
-import { writeFile, readFile } from 'fs/promises'
-import { statSync, existsSync, readFileSync, writeFileSync } from 'fs'
+import { writeFile } from 'fs/promises'
+import { statSync, existsSync, writeFileSync } from 'fs'
 import { getAudioInfo } from './audio/ffmpeg'
 import { validateFile, getFileFilters } from './audio/validate'
 import { createTask, getAllTasks, getTask, getResult, deleteTask, updateTask, updateResultAnalysis } from './db/database'
 import { startQueue, cancelCurrentTask, getCurrentTaskId, getTaskStartTime } from './taskQueue'
 import { getAvailableModels } from './utils/paths'
+import { getSettings, invalidateSettingsCache } from './utils/settings'
 import { callLLM } from './llm/dashscope'
 import { getSummaryPrompt, getSpeakersPrompt, getMinutesPrompt, getQaPrompt, getAskPrompt } from './llm/prompts'
 
@@ -25,6 +25,40 @@ function getMainWindow(): BrowserWindow | null {
   return wins.length > 0 ? wins[0] : null
 }
 
+async function addFilesCommon(filePaths: string[], modelType?: string) {
+  const tasks = []
+  const errors: string[] = []
+  for (const filePath of filePaths) {
+    try {
+      const validation = await validateFile(filePath)
+      if (!validation.valid) {
+        errors.push(`${filePath.split(/[\\/]/).pop()}: ${validation.error}`)
+        continue
+      }
+
+      const info = await getAudioInfo(filePath)
+      const task = await createTask({
+        fileName: filePath.split(/[\\/]/).pop() || '',
+        filePath,
+        fileSize: statSync(filePath).size,
+        duration: info.duration,
+        modelType,
+      })
+      tasks.push(JSON.parse(JSON.stringify(task)))
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '未知错误'
+      errors.push(`${filePath.split(/[\\/]/).pop()}: ${message}`)
+    }
+  }
+
+  const win = getMainWindow()
+  if (win && tasks.length > 0) {
+    startQueue(win)
+  }
+
+  return { tasks, errors }
+}
+
 export function registerIpcHandlers(): void {
   // 添加文件（支持多选）
   ipcMain.handle('add-files', async (_event, modelType?: string) => {
@@ -35,72 +69,12 @@ export function registerIpcHandlers(): void {
     })
 
     if (result.canceled || result.filePaths.length === 0) return { tasks: [] }
-
-    const tasks = []
-    const errors: string[] = []
-    for (const filePath of result.filePaths) {
-      try {
-        const validation = await validateFile(filePath)
-        if (!validation.valid) {
-          errors.push(`${filePath.split(/[\\/]/).pop()}: ${validation.error}`)
-          continue
-        }
-
-        const info = await getAudioInfo(filePath)
-        const task = await createTask({
-          fileName: filePath.split(/[\\/]/).pop() || '',
-          filePath,
-          fileSize: statSync(filePath).size,
-          duration: info.duration,
-          modelType,
-        })
-        tasks.push(JSON.parse(JSON.stringify(task)))
-      } catch (err: any) {
-        errors.push(`${filePath.split(/[\\/]/).pop()}: ${err.message}`)
-      }
-    }
-
-    // 启动队列
-    const win = getMainWindow()
-    if (win && tasks.length > 0) {
-      startQueue(win)
-    }
-
-    return { tasks, errors }
+    return addFilesCommon(result.filePaths, modelType)
   })
 
   // 验证并添加拖放的文件
   ipcMain.handle('add-dropped-files', async (_event, filePaths: string[], modelType?: string) => {
-    const tasks = []
-    const errors: string[] = []
-    for (const filePath of filePaths) {
-      try {
-        const validation = await validateFile(filePath)
-        if (!validation.valid) {
-          errors.push(`${filePath.split(/[\\/]/).pop()}: ${validation.error}`)
-          continue
-        }
-
-        const info = await getAudioInfo(filePath)
-        const task = await createTask({
-          fileName: filePath.split(/[\\/]/).pop() || '',
-          filePath,
-          fileSize: statSync(filePath).size,
-          duration: info.duration,
-          modelType,
-        })
-        tasks.push(JSON.parse(JSON.stringify(task)))
-      } catch (err: any) {
-        errors.push(`${filePath.split(/[\\/]/).pop()}: ${err.message}`)
-      }
-    }
-
-    const win = getMainWindow()
-    if (win && tasks.length > 0) {
-      startQueue(win)
-    }
-
-    return { tasks, errors }
+    return addFilesCommon(filePaths, modelType)
   })
 
   // 获取所有任务
@@ -226,20 +200,17 @@ export function registerIpcHandlers(): void {
   const settingsPath = join(app.getPath('userData'), 'settings.json')
 
   ipcMain.handle('get-settings', () => {
-    try {
-      if (existsSync(settingsPath)) {
-        return JSON.parse(readFileSync(settingsPath, 'utf-8'))
-      }
-    } catch { /* ignore */ }
-    return {}
+    return getSettings()
   })
 
   ipcMain.handle('save-settings', (_event, settings: Record<string, any>) => {
     try {
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8')
+      invalidateSettingsCache()
       return { success: true }
-    } catch (err: any) {
-      return { error: err.message }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '保存失败'
+      return { error: message }
     }
   })
 
@@ -252,6 +223,7 @@ export function registerIpcHandlers(): void {
   // 读取文件为 base64（供 wavesurfer 解码波形）
   ipcMain.handle('read-file-buffer', async (_event, filePath: string) => {
     if (!existsSync(filePath)) return { error: '文件不存在' }
+    const { readFileSync } = await import('fs')
     const buffer = readFileSync(filePath)
     return { base64: buffer.toString('base64') }
   })
@@ -309,9 +281,7 @@ export function registerIpcHandlers(): void {
     question?: string
   }) => {
     try {
-      const settings = existsSync(settingsPath)
-        ? JSON.parse(readFileSync(settingsPath, 'utf-8'))
-        : {}
+      const settings = getSettings()
 
       let prompt: { system: string; user: string }
       switch (params.type) {
@@ -328,8 +298,9 @@ export function registerIpcHandlers(): void {
 
       const result = await callLLM(settings, prompt.system, prompt.user)
       return { result }
-    } catch (err: any) {
-      return { error: err.message || '分析失败' }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '分析失败'
+      return { error: message }
     }
   })
 

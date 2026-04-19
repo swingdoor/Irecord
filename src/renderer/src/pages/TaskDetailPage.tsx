@@ -13,6 +13,20 @@ function formatDetailDate(iso: string): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+function getModelLabel(modelType?: string): string {
+  switch (modelType) {
+    case 'qwen3-asr': return 'Qwen3-ASR'
+    case 'sensevoice-small': return 'SenseVoice'
+    default: return modelType || '-'
+  }
+}
+
 export default function TaskDetailPage() {
   const { currentTaskId, setPage, currentResult, setCurrentResult, currentTask, setCurrentTask } = useAppStore()
   const [loading, setLoading] = useState(true)
@@ -85,7 +99,12 @@ export default function TaskDetailPage() {
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack} />
           <div>
             <Title level={5} style={{ margin: 0 }}>{currentTask.fileName}</Title>
-            <Text type="secondary" style={{ fontSize: 12 }}>{formatDetailDate(currentTask.createdAt)}</Text>
+            <Space size={16} style={{ fontSize: 12 }}>
+              <Text type="secondary">{formatDetailDate(currentTask.createdAt)}</Text>
+              <Text type="secondary">字数: {currentTask.wordCount?.toLocaleString() || '-'}</Text>
+              <Text type="secondary">模型: {getModelLabel(currentTask.modelType)}</Text>
+              <Text type="secondary">耗时: {currentTask.processingTime != null ? formatDuration(currentTask.processingTime) : '-'}</Text>
+            </Space>
           </div>
         </Space>
         <Space>
