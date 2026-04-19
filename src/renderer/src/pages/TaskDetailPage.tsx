@@ -45,6 +45,14 @@ function getStrategyLabel(strategy?: string): string {
   }
 }
 
+function getModelLabel(modelType?: string): string {
+  switch (modelType) {
+    case 'qwen3-asr': return 'Qwen3-ASR 0.6B'
+    case 'sensevoice-small': return 'SenseVoice Small'
+    default: return modelType || '未知'
+  }
+}
+
 // 高亮文本中的关键词
 function HighlightText({ text, keyword }: { text: string; keyword: string | null }) {
   if (!keyword) return <>{text}</>
@@ -167,10 +175,14 @@ export default function TaskDetailPage() {
       </div>
 
       {/* 摘要信息 */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-5 gap-4 mb-6">
         <div className="bg-white border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-gray-500 mb-1">文件</p>
           <p className="text-sm font-medium text-gray-800 truncate">{task.fileName}</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-lg p-3">
+          <p className="text-xs text-gray-500 mb-1">模型</p>
+          <p className="text-sm font-medium text-gray-800">{getModelLabel(task.modelType)}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-gray-500 mb-1">字数</p>

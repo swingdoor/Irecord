@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState } from 'react'
-import { Plus, FileAudio, Trash2, Loader2, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { Plus, FileAudio, Trash2, Loader2, CheckCircle, XCircle, Clock, X, Play, StopCircle } from 'lucide-react'
 import { useAppStore, Task } from '../stores/appStore'
 
 function formatDuration(seconds: number): string {
@@ -13,42 +13,76 @@ function formatDate(iso: string): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-function ProcessingTimer({ createdAt }: { createdAt: string }) {
+function ProcessingTimer({ startTime }: { startTime: number }) {
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
-    const start = new Date(createdAt).getTime()
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000)
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startTime) / 1000)), 1000)
     return () => clearInterval(timer)
-  }, [createdAt])
+  }, [startTime])
   return <span>{formatDuration(elapsed)}</span>
 }
 
 export default function TaskListPage() {
   const { tasks, refreshTasks, setPage, setCurrentTaskId } = useAppStore()
+  const [processingStartTime, setProcessingStartTime] = useState(Date.now())
+  const [selectedModel, setSelectedModel] = useState('qwen3-asr')
+  const [availableModels, setAvailableModels] = useState<Array<{ id: string; name: string; available: boolean }>>([])
 
   useEffect(() => {
     refreshTasks()
-    const unsub = window.electronAPI.onTaskStatusChanged(() => refreshTasks())
+    // 加载可用模型
+    window.electronAPI.getAvailableModels().then(models => {
+      setAvailableModels(models)
+      // 默认选择第一个可用模型
+      const firstAvailable = models.find(m => m.available)
+      if (firstAvailable) setSelectedModel(firstAvailable.id)
+    })
+    // 初始化时获取当前处理中任务的 startTime
+    window.electronAPI.getCurrentTaskInfo().then(info => {
+      if (info.startTime) setProcessingStartTime(info.startTime)
+    })
+    const unsub = window.electronAPI.onTaskStatusChanged((data) => {
+      if (data.startTime) setProcessingStartTime(data.startTime)
+      refreshTasks()
+    })
     return () => { unsub() }
   }, [refreshTasks])
 
+  const [addErrors, setAddErrors] = useState<string[]>([])
+
   const handleAddFiles = useCallback(async () => {
-    await window.electronAPI.addFiles()
+    setAddErrors([])
+    const result = await window.electronAPI.addFiles(selectedModel)
+    if (result.errors?.length) setAddErrors(result.errors)
     refreshTasks()
-  }, [refreshTasks])
+  }, [refreshTasks, selectedModel])
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
+    setAddErrors([])
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
-      await window.electronAPI.addDroppedFiles(files.map(f => f.path))
+      const result = await window.electronAPI.addDroppedFiles(files.map(f => f.path), selectedModel)
+      if (result.errors?.length) setAddErrors(result.errors)
       refreshTasks()
     }
-  }, [refreshTasks])
+  }, [refreshTasks, selectedModel])
 
   const handleDelete = useCallback(async (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation()
     await window.electronAPI.deleteTask(taskId)
+    refreshTasks()
+  }, [refreshTasks])
+
+  const handleRestart = useCallback(async (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation()
+    await window.electronAPI.restartTask(taskId)
+    refreshTasks()
+  }, [refreshTasks])
+
+  const handleCancel = useCallback(async (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation()
+    await window.electronAPI.cancelTask(taskId)
     refreshTasks()
   }, [refreshTasks])
 
@@ -60,16 +94,34 @@ export default function TaskListPage() {
 
   const active = tasks.filter(t => t.status === 'pending' || t.status === 'processing')
   const completed = tasks.filter(t => t.status === 'completed')
+  const stopped = tasks.filter(t => t.status === 'stopped')
   const failed = tasks.filter(t => t.status === 'failed')
 
   return (
     <div className="min-h-screen flex flex-col p-6" onDragOver={e => e.preventDefault()} onDrop={handleDrop}>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-gray-800">语音转写助手</h1>
-        <button onClick={handleAddFiles} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">
-          <Plus className="w-4 h-4" />添加文件
-        </button>
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedModel}
+            onChange={e => setSelectedModel(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white text-gray-700"
+          >
+            {availableModels.filter(m => m.available).map(m => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+          <button onClick={handleAddFiles} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">
+            <Plus className="w-4 h-4" />添加文件
+          </button>
+        </div>
       </div>
+
+      {addErrors.length > 0 && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-700">{addErrors.join('；')}</p>
+        </div>
+      )}
 
       {tasks.length === 0 && (
         <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
@@ -92,10 +144,40 @@ export default function TaskListPage() {
                   <p className="text-sm font-medium text-gray-800 truncate">{task.fileName}</p>
                   <p className="text-xs text-gray-500">
                     {task.status === 'processing'
-                      ? <>语音识别中 · <ProcessingTimer createdAt={task.createdAt} /></>
+                      ? <>语音识别中 · <ProcessingTimer startTime={processingStartTime} /></>
                       : '排队中'}
                   </p>
                 </div>
+                <button onClick={e => handleCancel(e, task.id)} className="p-1 text-gray-400 hover:text-orange-500 transition-colors" title="取消">
+                  <X className="w-4 h-4" />
+                </button>
+                <button onClick={e => handleDelete(e, task.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors" title="删除">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 已停止 */}
+      {stopped.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-sm font-medium text-gray-500 mb-3">已停止</h2>
+          <div className="space-y-2">
+            {stopped.map(task => (
+              <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                <StopCircle className="w-5 h-5 text-gray-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 truncate">{task.fileName}</p>
+                  <p className="text-xs text-gray-500">已停止</p>
+                </div>
+                <button onClick={e => handleRestart(e, task.id)} className="p-1 text-gray-400 hover:text-blue-500 transition-colors" title="重新开始">
+                  <Play className="w-4 h-4" />
+                </button>
+                <button onClick={e => handleDelete(e, task.id)} className="p-1 text-gray-400 hover:text-red-500 transition-colors" title="删除">
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             ))}
           </div>
@@ -137,6 +219,9 @@ export default function TaskListPage() {
                   <p className="text-sm font-medium text-gray-800 truncate">{task.fileName}</p>
                   <p className="text-xs text-red-600 truncate">{task.error || '未知错误'}</p>
                 </div>
+                <button onClick={e => handleRestart(e, task.id)} className="p-1 text-gray-400 hover:text-blue-500 transition-colors" title="重新开始">
+                  <Play className="w-4 h-4" />
+                </button>
                 <button onClick={e => handleDelete(e, task.id)} className="p-1 text-gray-300 hover:text-red-500 transition-colors">
                   <Trash2 className="w-4 h-4" />
                 </button>

@@ -23,7 +23,25 @@ function formatTimestamp(sec) {
 
 // ========== ASR 引擎 ==========
 
-function createRecognizer(modelDir, numThreads) {
+function createRecognizer(modelDir, modelType, numThreads) {
+  if (modelType === 'sensevoice-small') {
+    return new sherpa.OfflineRecognizer({
+      modelConfig: {
+        senseVoice: {
+          model: path.join(modelDir, 'model.int8.onnx'),
+          language: '',
+          useInverseTextNormalization: 1,
+        },
+        tokens: path.join(modelDir, 'tokens.txt'),
+        numThreads,
+        provider: 'cpu',
+        debug: 0,
+      },
+      decodingMethod: 'greedy_search',
+    });
+  }
+
+  // 默认: qwen3-asr
   const files = fs.readdirSync(modelDir);
   const convFrontendFile = files.find(f => f.includes('conv') && f.includes('frontend') && f.endsWith('.onnx'));
   const encoderFile = files.find(f => f.includes('encoder') && f.endsWith('.onnx'));
@@ -121,7 +139,7 @@ function postProcessSegments(segments) {
 // ========== 策略 1: 说话人分离 ==========
 
 function runWithDiarization(args) {
-  const { wavPath, modelDir, segmentationModelPath, embeddingModelPath, numThreads } = args;
+  const { wavPath, modelDir, modelType, segmentationModelPath, embeddingModelPath, numThreads } = args;
 
   send({ type: 'progress', stage: 'initializing', percent: 10 });
 
@@ -143,7 +161,7 @@ function runWithDiarization(args) {
     minDurationOff: 1.0, // 最短静音 1 秒，避免过度切分
   });
 
-  const recognizer = createRecognizer(modelDir, numThreads);
+  const recognizer = createRecognizer(modelDir, modelType, numThreads);
 
   send({ type: 'progress', stage: 'segmenting', percent: 20 });
 
@@ -216,7 +234,7 @@ function runWithDiarization(args) {
 // ========== 策略 2: VAD 分段 ==========
 
 function runWithVAD(args) {
-  const { wavPath, modelDir, vadModelPath, numThreads } = args;
+  const { wavPath, modelDir, modelType, vadModelPath, numThreads } = args;
 
   send({ type: 'progress', stage: 'initializing', percent: 10 });
 
@@ -232,7 +250,7 @@ function runWithVAD(args) {
     debug: 0,
   });
 
-  const recognizer = createRecognizer(modelDir, numThreads);
+  const recognizer = createRecognizer(modelDir, modelType, numThreads);
 
   send({ type: 'progress', stage: 'segmenting', percent: 20 });
 
@@ -286,11 +304,11 @@ function runWithVAD(args) {
 // ========== 策略 3: 整体识别 ==========
 
 function runPlain(args) {
-  const { wavPath, modelDir, numThreads } = args;
+  const { wavPath, modelDir, modelType, numThreads } = args;
 
   send({ type: 'progress', stage: 'initializing', percent: 10 });
 
-  const recognizer = createRecognizer(modelDir, numThreads);
+  const recognizer = createRecognizer(modelDir, modelType, numThreads);
 
   send({ type: 'progress', stage: 'recognizing', percent: 30 });
 

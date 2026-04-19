@@ -2,7 +2,8 @@ import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { cleanupOldTempFiles, cleanupTempFiles } from './audio/temp'
 import { registerIpcHandlers } from './ipc'
-import { closeDb } from './db/database'
+import { closeDb, resetStaleTasks } from './db/database'
+import { shutdownQueue, startQueue } from './taskQueue'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -32,10 +33,14 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   cleanupOldTempFiles()
+  await resetStaleTasks()
   registerIpcHandlers()
   createWindow()
+
+  // 启动时自动处理残留的 pending 任务
+  if (mainWindow) startQueue(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -50,7 +55,8 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
+  await shutdownQueue()
   cleanupTempFiles()
   closeDb()
 })

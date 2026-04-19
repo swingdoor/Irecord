@@ -33,14 +33,38 @@ export function getQwen3AsrModelPath(): string {
 }
 
 /**
- * 检查模型文件是否存在
+ * 获取 SenseVoice Small 模型路径
  */
-export function checkModelExists(): boolean {
+export function getSenseVoiceModelPath(): string {
+  const modelDir = join(getModelsPath(), 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17')
+  return modelDir
+}
+
+/**
+ * 检查 Qwen3-ASR 模型文件是否存在
+ */
+export function checkQwen3AsrModelExists(): boolean {
   const modelPath = getQwen3AsrModelPath()
   const encoderFile = join(modelPath, 'encoder.int8.onnx')
   const decoderFile = join(modelPath, 'decoder.int8.onnx')
-
   return existsSync(encoderFile) && existsSync(decoderFile)
+}
+
+/**
+ * 检查 SenseVoice 模型文件是否存在
+ */
+export function checkSenseVoiceModelExists(): boolean {
+  const modelPath = getSenseVoiceModelPath()
+  const modelFile = join(modelPath, 'model.int8.onnx')
+  const tokensFile = join(modelPath, 'tokens.txt')
+  return existsSync(modelFile) && existsSync(tokensFile)
+}
+
+/**
+ * 检查模型文件是否存在（兼容旧代码）
+ */
+export function checkModelExists(): boolean {
+  return checkQwen3AsrModelExists()
 }
 
 /**
@@ -104,4 +128,31 @@ export function getFfprobePath(): string {
  */
 export function checkFfmpegExists(): boolean {
   return existsSync(getFfmpegPath()) && existsSync(getFfprobePath())
+}
+
+export interface ModelInfo {
+  id: string
+  name: string
+  available: boolean
+  modelDir: string
+}
+
+/**
+ * 获取所有支持的模型及其可用状态
+ */
+export function getAvailableModels(): ModelInfo[] {
+  return [
+    {
+      id: 'qwen3-asr',
+      name: 'Qwen3-ASR 0.6B（高精度）',
+      available: checkQwen3AsrModelExists(),
+      modelDir: getQwen3AsrModelPath(),
+    },
+    {
+      id: 'sensevoice-small',
+      name: 'SenseVoice Small（轻量快速）',
+      available: checkSenseVoiceModelExists(),
+      modelDir: getSenseVoiceModelPath(),
+    },
+  ]
 }

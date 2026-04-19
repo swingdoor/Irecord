@@ -13,7 +13,8 @@ export interface Task {
   filePath: string
   fileSize: number
   duration: number
-  status: 'pending' | 'processing' | 'completed' | 'failed'
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'stopped'
+  modelType: string
   strategy: string | null
   error: string | null
   createdAt: string
@@ -53,6 +54,7 @@ async function getDb(): Promise<SqlJsDatabase> {
       fileSize INTEGER DEFAULT 0,
       duration REAL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'pending',
+      modelType TEXT DEFAULT 'qwen3-asr',
       strategy TEXT,
       error TEXT,
       createdAt TEXT NOT NULL,
@@ -61,6 +63,13 @@ async function getDb(): Promise<SqlJsDatabase> {
       wordCount INTEGER
     )
   `)
+
+  // 迁移：为旧数据库添加 modelType 列
+  try {
+    db.run(`ALTER TABLE tasks ADD COLUMN modelType TEXT DEFAULT 'qwen3-asr'`)
+  } catch (e) {
+    // 列已存在，忽略错误
+  }
 
   db.run(`
     CREATE TABLE IF NOT EXISTS results (
@@ -102,7 +111,7 @@ function queryOne(d: SqlJsDatabase, sql: string, params: any[] = []): any | unde
 
 // ===== Task CRUD =====
 
-export async function createTask(file: { fileName: string; filePath: string; fileSize: number; duration: number }): Promise<Task> {
+export async function createTask(file: { fileName: string; filePath: string; fileSize: number; duration: number; modelType?: string }): Promise<Task> {
   const d = await getDb()
   const task: Task = {
     id: randomUUID(),
@@ -111,6 +120,7 @@ export async function createTask(file: { fileName: string; filePath: string; fil
     fileSize: file.fileSize,
     duration: file.duration,
     status: 'pending',
+    modelType: file.modelType || 'qwen3-asr',
     strategy: null,
     error: null,
     createdAt: new Date().toISOString(),
@@ -120,8 +130,8 @@ export async function createTask(file: { fileName: string; filePath: string; fil
   }
 
   d.run(
-    'INSERT INTO tasks (id, fileName, filePath, fileSize, duration, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [task.id, task.fileName, task.filePath, task.fileSize, task.duration, task.status, task.createdAt]
+    'INSERT INTO tasks (id, fileName, filePath, fileSize, duration, status, modelType, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [task.id, task.fileName, task.filePath, task.fileSize, task.duration, task.status, task.modelType, task.createdAt]
   )
   saveDb()
   return task
@@ -211,4 +221,13 @@ export function closeDb() {
     db.close()
     db = null
   }
+}
+
+/**
+ * 启动时重置残留的 processing 任务为 pending
+ */
+export async function resetStaleTasks() {
+  const d = await getDb()
+  d.run("UPDATE tasks SET status = 'pending' WHERE status = 'processing'")
+  saveDb()
 }

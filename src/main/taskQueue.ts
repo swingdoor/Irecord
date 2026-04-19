@@ -3,7 +3,7 @@ import { spawn, ChildProcess } from 'child_process'
 import { join } from 'path'
 import { cpus } from 'os'
 import { getNextPendingTask, hasProcessingTask, updateTask, saveResult } from './db/database'
-import { getQwen3AsrModelPath, getVadModelPath, getSegmentationModelPath, getEmbeddingModelPath } from './utils/paths'
+import { getQwen3AsrModelPath, getSenseVoiceModelPath, getVadModelPath, getSegmentationModelPath, getEmbeddingModelPath } from './utils/paths'
 import { convertToWav, needsConversion } from './audio/ffmpeg'
 import { deleteTempFile } from './audio/temp'
 
@@ -24,7 +24,7 @@ async function processNext(win: BrowserWindow) {
   currentTaskId = task.id
   taskStartTime = Date.now()
 
-  await updateTask(task.id, { status: 'processing' })
+  await updateTask(task.id, { status: 'processing', processingTime: null })
   notifyTaskChanged(win, task.id)
 
   let tempWavPath: string | null = null
@@ -42,9 +42,15 @@ async function processNext(win: BrowserWindow) {
       ? join(process.resourcesPath, 'asr-process.js')
       : join(__dirname, '../../src/main/engine/asr-process.js')
 
+    // 根据 modelType 选择模型路径
+    const modelDir = task.modelType === 'sensevoice-small'
+      ? getSenseVoiceModelPath()
+      : getQwen3AsrModelPath()
+
     const inputData = JSON.stringify({
       wavPath,
-      modelDir: getQwen3AsrModelPath(),
+      modelDir,
+      modelType: task.modelType || 'qwen3-asr',
       vadModelPath: getVadModelPath(),
       segmentationModelPath: getSegmentationModelPath(),
       embeddingModelPath: getEmbeddingModelPath(),
@@ -139,7 +145,7 @@ async function processNext(win: BrowserWindow) {
 }
 
 function notifyTaskChanged(win: BrowserWindow, taskId: string) {
-  win.webContents.send('task-status-changed', { taskId })
+  win.webContents.send('task-status-changed', { taskId, startTime: taskStartTime })
 }
 
 export async function cancelCurrentTask(win: BrowserWindow) {
@@ -148,9 +154,10 @@ export async function cancelCurrentTask(win: BrowserWindow) {
     currentProcess = null
   }
   if (currentTaskId) {
-    await updateTask(currentTaskId, { status: 'failed', error: '用户取消', completedAt: new Date().toISOString() })
+    await updateTask(currentTaskId, { status: 'stopped', completedAt: new Date().toISOString() })
     notifyTaskChanged(win, currentTaskId)
     currentTaskId = null
+    // 事件驱动：取消后自动处理下一个
     processNext(win)
   }
 }
@@ -161,4 +168,18 @@ export function getCurrentTaskId(): string | null {
 
 export function getTaskStartTime(): number {
   return taskStartTime
+}
+
+/**
+ * 应用退出时调用：杀掉子进程，将 processing 任务重置为 pending
+ */
+export async function shutdownQueue() {
+  if (currentProcess) {
+    currentProcess.kill()
+    currentProcess = null
+  }
+  if (currentTaskId) {
+    await updateTask(currentTaskId, { status: 'pending' })
+    currentTaskId = null
+  }
 }

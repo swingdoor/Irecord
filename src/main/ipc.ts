@@ -4,8 +4,9 @@ import { writeFile } from 'fs/promises'
 import { statSync } from 'fs'
 import { getAudioInfo } from './audio/ffmpeg'
 import { validateFile, getFileFilters } from './audio/validate'
-import { createTask, getAllTasks, getTask, getResult, deleteTask } from './db/database'
+import { createTask, getAllTasks, getTask, getResult, deleteTask, updateTask } from './db/database'
 import { startQueue, cancelCurrentTask, getCurrentTaskId, getTaskStartTime } from './taskQueue'
+import { getAvailableModels } from './utils/paths'
 
 function formatTimestamp(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -21,7 +22,7 @@ function getMainWindow(): BrowserWindow | null {
 
 export function registerIpcHandlers(): void {
   // 添加文件（支持多选）
-  ipcMain.handle('add-files', async () => {
+  ipcMain.handle('add-files', async (_event, modelType?: string) => {
     const result = await dialog.showOpenDialog({
       title: '选择音频/视频文件',
       filters: getFileFilters(),
@@ -31,10 +32,14 @@ export function registerIpcHandlers(): void {
     if (result.canceled || result.filePaths.length === 0) return { tasks: [] }
 
     const tasks = []
+    const errors: string[] = []
     for (const filePath of result.filePaths) {
       try {
         const validation = await validateFile(filePath)
-        if (!validation.valid) continue
+        if (!validation.valid) {
+          errors.push(`${filePath.split(/[\\/]/).pop()}: ${validation.error}`)
+          continue
+        }
 
         const info = await getAudioInfo(filePath)
         const task = await createTask({
@@ -42,9 +47,12 @@ export function registerIpcHandlers(): void {
           filePath,
           fileSize: statSync(filePath).size,
           duration: info.duration,
+          modelType,
         })
         tasks.push(JSON.parse(JSON.stringify(task)))
-      } catch {}
+      } catch (err: any) {
+        errors.push(`${filePath.split(/[\\/]/).pop()}: ${err.message}`)
+      }
     }
 
     // 启动队列
@@ -53,16 +61,20 @@ export function registerIpcHandlers(): void {
       startQueue(win)
     }
 
-    return { tasks }
+    return { tasks, errors }
   })
 
   // 验证并添加拖放的文件
-  ipcMain.handle('add-dropped-files', async (_event, filePaths: string[]) => {
+  ipcMain.handle('add-dropped-files', async (_event, filePaths: string[], modelType?: string) => {
     const tasks = []
+    const errors: string[] = []
     for (const filePath of filePaths) {
       try {
         const validation = await validateFile(filePath)
-        if (!validation.valid) continue
+        if (!validation.valid) {
+          errors.push(`${filePath.split(/[\\/]/).pop()}: ${validation.error}`)
+          continue
+        }
 
         const info = await getAudioInfo(filePath)
         const task = await createTask({
@@ -70,9 +82,12 @@ export function registerIpcHandlers(): void {
           filePath,
           fileSize: statSync(filePath).size,
           duration: info.duration,
+          modelType,
         })
         tasks.push(JSON.parse(JSON.stringify(task)))
-      } catch {}
+      } catch (err: any) {
+        errors.push(`${filePath.split(/[\\/]/).pop()}: ${err.message}`)
+      }
     }
 
     const win = getMainWindow()
@@ -80,13 +95,18 @@ export function registerIpcHandlers(): void {
       startQueue(win)
     }
 
-    return { tasks }
+    return { tasks, errors }
   })
 
   // 获取所有任务
   ipcMain.handle('get-tasks', async () => {
     const tasks = await getAllTasks()
     return JSON.parse(JSON.stringify(tasks))
+  })
+
+  // 获取可用模型列表
+  ipcMain.handle('get-available-models', () => {
+    return getAvailableModels()
   })
 
   // 获取任务结果
@@ -110,16 +130,37 @@ export function registerIpcHandlers(): void {
     }))
   })
 
-  // 删除任务
+  // 删除任务（如果正在处理则先取消）
   ipcMain.handle('delete-task', async (_event, taskId: string) => {
+    const task = await getTask(taskId)
+    if (task?.status === 'processing') {
+      const win = getMainWindow()
+      if (win) await cancelCurrentTask(win)
+    }
     await deleteTask(taskId)
     return { success: true }
   })
 
-  // 取消当前任务
-  ipcMain.handle('cancel-current-task', () => {
+  // 取消任务（processing → stopped, pending → stopped）
+  ipcMain.handle('cancel-task', async (_event, taskId: string) => {
+    const task = await getTask(taskId)
+    if (!task) return { error: '任务不存在' }
+
+    if (task.status === 'processing') {
+      const win = getMainWindow()
+      if (win) await cancelCurrentTask(win)
+    } else if (task.status === 'pending') {
+      await updateTask(taskId, { status: 'stopped' })
+      // 不需要触发 processNext，pending 任务取消不影响队列
+    }
+    return { success: true }
+  })
+
+  // 重新启动任务（stopped/failed → pending）
+  ipcMain.handle('restart-task', async (_event, taskId: string) => {
+    await updateTask(taskId, { status: 'pending', error: null, completedAt: null, processingTime: null, wordCount: null })
     const win = getMainWindow()
-    if (win) cancelCurrentTask(win)
+    if (win) startQueue(win)
     return { success: true }
   })
 

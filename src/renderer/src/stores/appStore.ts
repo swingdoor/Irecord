@@ -8,7 +8,8 @@ export interface Task {
   filePath: string
   fileSize: number
   duration: number
-  status: 'pending' | 'processing' | 'completed' | 'failed'
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'stopped'
+  modelType: string
   strategy: string | null
   error: string | null
   createdAt: string
