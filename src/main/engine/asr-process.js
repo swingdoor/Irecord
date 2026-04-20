@@ -5,10 +5,17 @@
  *   2. Silero VAD → VAD 分段识别
  *   3. 都没有 → 整体识别
  */
-const sherpa = require('sherpa-onnx-node');
 const path = require('path');
 const fs = require('fs');
-const { extractKeywords } = require('../keywords/extract.js');
+const sherpa = require('sherpa-onnx-node');
+
+// 打包后 extract.js 和 asr-process.js 都在 resources/ 根目录
+// 开发时 asr-process.js 在 src/main/engine/，extract.js 在 src/main/keywords/
+const isPackaged = !__dirname.includes('src');
+const extractKeywordsPath = isPackaged
+  ? path.join(__dirname, 'extract.js')
+  : path.join(__dirname, '../keywords/extract.js');
+const { extractKeywords } = require(extractKeywordsPath);
 
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n');

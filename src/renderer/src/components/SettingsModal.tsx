@@ -119,7 +119,7 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                 <Form.Item label="模型文件夹">
                   <Space.Compact style={{ width: '100%' }}>
                     <Form.Item name="modelDir" noStyle>
-                      <Input placeholder="留空使用默认路径 (resources/models)" />
+                      <Input placeholder="请选择模型文件夹路径（必填）" />
                     </Form.Item>
                     <Button icon={<FolderOpenOutlined />} onClick={() => handleSelectFolder('modelDir')} />
                   </Space.Compact>
@@ -127,13 +127,13 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                 <Form.Item label="FFmpeg 文件夹">
                   <Space.Compact style={{ width: '100%' }}>
                     <Form.Item name="ffmpegDir" noStyle>
-                      <Input placeholder="留空使用默认路径 (resources/ffmpeg)" />
+                      <Input placeholder="请选择 FFmpeg 所在文件夹路径（必填）" />
                     </Form.Item>
                     <Button icon={<FolderOpenOutlined />} onClick={() => handleSelectFolder('ffmpegDir')} />
                   </Space.Compact>
                 </Form.Item>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  策略说明：「自动选择」会根据已下载的模型自动选择最佳策略；手动指定时，若对应模型未下载则自动降级。
+                  提示：安装包不包含模型和 FFmpeg，请手动下载后在此配置路径。策略说明：「自动选择」会根据已下载的模型自动选择最佳策略；手动指定时，若对应模型未下载则自动降级。
                 </Text>
               </Form>
             ),

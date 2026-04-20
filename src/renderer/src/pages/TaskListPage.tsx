@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState } from 'react'
-import { Typography, Alert, Button, Segmented, Space } from 'antd'
+import { Typography, Alert, Button, Segmented, Space, Modal } from 'antd'
 import { BgColorsOutlined, SettingOutlined } from '@ant-design/icons'
 import { useAppStore, Task } from '../stores/appStore'
 import { FeatureCards } from '../components/FeatureCards'
@@ -53,6 +53,24 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
 
   const handleAddFiles = useCallback(async () => {
     setAddErrors([])
+
+    // 转写前校验资源
+    const { ffmpegExists, hasAnyModel } = await window.electronAPI.checkResources()
+    if (!ffmpegExists || !hasAnyModel) {
+      const missing = [
+        !ffmpegExists ? 'FFmpeg' : null,
+        !hasAnyModel ? '模型' : null,
+      ].filter(Boolean).join(' 和 ')
+
+      Modal.error({
+        title: '无法开始转写',
+        content: `缺少必要资源：${missing}。请先在设置中配置路径。`,
+        okText: '去设置',
+        onOk: () => setSettingsOpen(true),
+      })
+      return
+    }
+
     const result = await window.electronAPI.addFiles(selectedModel)
     if (result.errors?.length) setAddErrors(result.errors)
     refreshTasks()
@@ -61,6 +79,24 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     setAddErrors([])
+
+    // 转写前校验资源
+    const { ffmpegExists, hasAnyModel } = await window.electronAPI.checkResources()
+    if (!ffmpegExists || !hasAnyModel) {
+      const missing = [
+        !ffmpegExists ? 'FFmpeg' : null,
+        !hasAnyModel ? '模型' : null,
+      ].filter(Boolean).join(' 和 ')
+
+      Modal.error({
+        title: '无法开始转写',
+        content: `缺少必要资源：${missing}。请先在设置中配置路径。`,
+        okText: '去设置',
+        onOk: () => setSettingsOpen(true),
+      })
+      return
+    }
+
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
       const result = await window.electronAPI.addDroppedFiles(files.map(f => f.path), selectedModel)

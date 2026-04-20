@@ -64,8 +64,19 @@ async function processNext(win: BrowserWindow) {
     })
 
     const result = await new Promise<any>((resolve, reject) => {
+      // 打包后 node_modules 在 app.asar.unpacked 里，需要通过 NODE_PATH 和 cwd 让子进程找到
+      const spawnEnv = { ...process.env }
+      let spawnCwd: string | undefined
+      if (app.isPackaged) {
+        const unpackedModules = join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
+        spawnEnv.NODE_PATH = unpackedModules
+        spawnCwd = join(process.resourcesPath, 'app.asar.unpacked')
+      }
+
       currentProcess = spawn('node', [scriptPath], {
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: spawnEnv,
+        cwd: spawnCwd,
       })
 
       let stdout = ''

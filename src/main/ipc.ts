@@ -8,7 +8,7 @@ import { getAudioInfo } from './audio/ffmpeg'
 import { validateFile, getFileFilters } from './audio/validate'
 import { createTask, getAllTasks, getTask, getResult, deleteTask, updateTask, updateResultAnalysis } from './db/database'
 import { startQueue, cancelCurrentTask, getCurrentTaskId, getTaskStartTime } from './taskQueue'
-import { getAvailableModels } from './utils/paths'
+import { getAvailableModels, checkFfmpegExists, checkQwen3AsrModelExists, checkSenseVoiceModelExists } from './utils/paths'
 import { getSettings, invalidateSettingsCache } from './utils/settings'
 import { callLLM } from './llm/dashscope'
 import { getSummaryPrompt, getSpeakersPrompt, getMinutesPrompt, getQaPrompt, getAskPrompt } from './llm/prompts'
@@ -86,6 +86,14 @@ export function registerIpcHandlers(): void {
   // 获取可用模型列表
   ipcMain.handle('get-available-models', () => {
     return getAvailableModels()
+  })
+
+  // 检查必要资源是否存在
+  ipcMain.handle('check-resources', () => {
+    return {
+      ffmpegExists: checkFfmpegExists(),
+      hasAnyModel: checkQwen3AsrModelExists() || checkSenseVoiceModelExists(),
+    }
   })
 
   // 获取任务结果

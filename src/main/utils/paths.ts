@@ -96,7 +96,7 @@ export function checkModelExists(): boolean {
  * 获取 Silero VAD 模型路径
  */
 export function getVadModelPath(): string {
-  return getResourcePath('models', 'silero-vad', 'silero_vad.onnx')
+  return join(getModelsPath(), 'silero-vad', 'silero_vad.onnx')
 }
 
 /**
@@ -110,7 +110,7 @@ export function checkVadModelExists(): boolean {
  * 获取说话人分离模型目录路径
  */
 export function getDiarizationModelPath(): string {
-  return getResourcePath('models', 'speaker-diarization')
+  return join(getModelsPath(), 'speaker-diarization')
 }
 
 /**

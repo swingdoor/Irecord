@@ -59,7 +59,14 @@
       "Bash(ls -la node_modules/sherpa-onnx-win-x64/*.dll)",
       "Bash(npx electron-vite:*)",
       "Bash(node:*)",
-      "Bash(D:/03code_project/05Irecord/resources/ffmpeg/ffprobe.exe:*)"
+      "Bash(D:/03code_project/05Irecord/resources/ffmpeg/ffprobe.exe:*)",
+      "Bash(git add:*)",
+      "Bash(git restore:*)",
+      "Bash(git commit:*)",
+      "Bash(electron-builder --win --x64 --config.electronRebuild=false)",
+      "Bash(npx electron-builder:*)",
+      "Bash(export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/)",
+      "Bash(export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/)"
     ]
   }
 }

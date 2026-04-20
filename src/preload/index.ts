@@ -69,6 +69,9 @@ const electronAPI = {
   selectFolder: (): Promise<{ path?: string; canceled?: boolean }> =>
     ipcRenderer.invoke('select-folder'),
 
+  checkResources: (): Promise<{ ffmpegExists: boolean; hasAnyModel: boolean }> =>
+    ipcRenderer.invoke('check-resources'),
+
   llmAnalyze: (params: {
     type: 'summary' | 'speakers' | 'minutes' | 'qa' | 'ask'
     text: string
