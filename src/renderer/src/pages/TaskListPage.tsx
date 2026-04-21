@@ -1,9 +1,10 @@
 import { useEffect, useCallback, useState } from 'react'
-import { Typography, Alert, Button, Segmented, Space, Modal } from 'antd'
+import { Typography, Alert, Button, Segmented, Space, Modal, Tabs } from 'antd'
 import { BgColorsOutlined, SettingOutlined } from '@ant-design/icons'
-import { useAppStore, Task } from '../stores/appStore'
+import { useAppStore, Task, RealtimeRecording } from '../stores/appStore'
 import { FeatureCards } from '../components/FeatureCards'
 import { TaskTable } from '../components/TaskTable'
+import { RealtimeRecordingTable } from '../components/RealtimeRecordingTable'
 import { SettingsModal } from '../components/SettingsModal'
 
 const { Title } = Typography
@@ -14,22 +15,29 @@ interface TaskListPageProps {
 }
 
 export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageProps) {
-  const { tasks, refreshTasks, setPage, setCurrentTaskId } = useAppStore()
+  const { tasks, refreshTasks, realtimeRecordings, refreshRealtimeRecordings, setPage, setCurrentTaskId, setCurrentRealtimeRecordingId } = useAppStore()
   const [processingStartTime, setProcessingStartTime] = useState(Date.now())
   const [selectedModel, setSelectedModel] = useState('qwen3-asr')
   const [availableModels, setAvailableModels] = useState<Array<{ id: string; name: string; available: boolean }>>([])
   const [addErrors, setAddErrors] = useState<string[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [streamingModelAvailable, setStreamingModelAvailable] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>('realtime')
 
   useEffect(() => {
     refreshTasks()
+    refreshRealtimeRecordings()
     Promise.all([
       window.electronAPI.getAvailableModels(),
       window.electronAPI.getSettings(),
-    ]).then(([models, settings]) => {
+      window.electronAPI.checkStreamingModel(),
+    ]).then(([models, settings, streamingModel]) => {
       setAvailableModels(models)
       const defaultModel = settings.defaultModel || models.find(m => m.available)?.id || 'qwen3-asr'
       setSelectedModel(defaultModel)
+      setStreamingModelAvailable(streamingModel.available)
+      // Restore active tab from settings
+      if (settings.activeTab) setActiveTab(settings.activeTab)
     })
     window.electronAPI.getCurrentTaskInfo().then(info => {
       if (info.startTime) setProcessingStartTime(info.startTime)
@@ -39,7 +47,7 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
       refreshTasks()
     })
     return () => { unsub() }
-  }, [refreshTasks])
+  }, [refreshTasks, refreshRealtimeRecordings])
 
   const handleSettingsChange = useCallback((settings: Record<string, any>) => {
     if (settings.defaultModel) setSelectedModel(settings.defaultModel)
@@ -124,10 +132,39 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
   }, [refreshTasks])
 
   const handleViewDetail = useCallback((task: Task) => {
-    if (task.status !== 'completed') return
+    if (task.status !== 'completed' && task.status !== 'pending_analysis') return
     setCurrentTaskId(task.id)
     setPage('taskDetail')
   }, [setCurrentTaskId, setPage])
+
+  const handleRecord = useCallback(() => {
+    setPage('recording')
+  }, [setPage])
+
+  const handleExportAudio = useCallback(async (_e: React.MouseEvent, filePath: string) => {
+    await window.electronAPI.exportAudio(filePath)
+  }, [])
+
+  const handleDeepAnalysisFromList = useCallback(async (_e: React.MouseEvent, taskId: string) => {
+    await window.electronAPI.startDeepAnalysis(taskId)
+    refreshTasks()
+  }, [refreshTasks])
+
+  const handleTabChange = useCallback(async (key: string) => {
+    setActiveTab(key)
+    const settings = await window.electronAPI.getSettings()
+    await window.electronAPI.saveSettings({ ...settings, activeTab: key })
+  }, [])
+
+  const handleViewRecording = useCallback((recording: RealtimeRecording) => {
+    setCurrentRealtimeRecordingId(recording.id)
+    setPage('realtimeRecordingDetail')
+  }, [setCurrentRealtimeRecordingId, setPage])
+
+  const handleDeleteRecording = useCallback(async (id: string) => {
+    await window.electronAPI.deleteRealtimeRecording(id)
+    refreshRealtimeRecordings()
+  }, [refreshRealtimeRecordings])
 
   return (
     <div
@@ -154,17 +191,31 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
         <Alert type="error" message={addErrors.join('；')} closable onClose={() => setAddErrors([])} />
       )}
 
-      <FeatureCards onUpload={handleAddFiles} />
+      <FeatureCards onUpload={handleAddFiles} onRecord={handleRecord} streamingModelAvailable={streamingModelAvailable} />
 
-      <TaskTable
-        tasks={tasks}
-        processingStartTime={processingStartTime}
-        themeMode={themeMode}
-        onViewDetail={handleViewDetail}
-        onDelete={handleDelete}
-        onRestart={handleRestart}
-        onCancel={handleCancel}
-      />
+      <Tabs activeKey={activeTab} onChange={handleTabChange}>
+        <Tabs.TabPane tab="实时录音" key="realtime">
+          <RealtimeRecordingTable
+            recordings={realtimeRecordings}
+            onView={handleViewRecording}
+            onDelete={handleDeleteRecording}
+            onRefresh={refreshRealtimeRecordings}
+          />
+        </Tabs.TabPane>
+        <Tabs.TabPane tab="文件上传" key="upload">
+          <TaskTable
+            tasks={tasks}
+            processingStartTime={processingStartTime}
+            themeMode={themeMode}
+            onViewDetail={handleViewDetail}
+            onDelete={handleDelete}
+            onRestart={handleRestart}
+            onCancel={handleCancel}
+            onExportAudio={handleExportAudio}
+            onDeepAnalysis={handleDeepAnalysisFromList}
+          />
+        </Tabs.TabPane>
+      </Tabs>
 
       <SettingsModal
         open={settingsOpen}

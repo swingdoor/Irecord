@@ -3,6 +3,8 @@ import { ConfigProvider, Modal } from 'antd'
 import { useAppStore } from './stores/appStore'
 import TaskListPage from './pages/TaskListPage'
 import TaskDetailPage from './pages/TaskDetailPage'
+import RecordingPage from './pages/RecordingPage'
+import RealtimeRecordingDetailPage from './pages/RealtimeRecordingDetailPage'
 
 function App() {
   const page = useAppStore((state) => state.page)
@@ -94,6 +96,8 @@ function App() {
     <ConfigProvider theme={themeConfig}>
       {page === 'taskList' && <TaskListPage themeMode={themeMode} onThemeChange={setThemeMode} />}
       {page === 'taskDetail' && <TaskDetailPage />}
+      {page === 'recording' && <RecordingPage />}
+      {page === 'realtimeRecordingDetail' && <RealtimeRecordingDetailPage />}
     </ConfigProvider>
   )
 }

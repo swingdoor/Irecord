@@ -13,7 +13,7 @@ export interface Task {
   filePath: string
   fileSize: number
   duration: number
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'stopped'
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'stopped' | 'pending_analysis' | 'recording'
   modelType: string
   strategy: string | null
   error: string | null
@@ -31,6 +31,18 @@ export interface TaskResult {
   keywords: string | null
   lang: string
   strategy: string | null
+}
+
+export interface RealtimeRecording {
+  id: string
+  title: string
+  filePath: string
+  fileSize: number
+  duration: number
+  wordCount: number
+  createdAt: string
+  text: string
+  segments: string
 }
 
 async function getDb(): Promise<SqlJsDatabase> {
@@ -93,6 +105,21 @@ async function getDb(): Promise<SqlJsDatabase> {
     try { db.run(`ALTER TABLE results ADD COLUMN ${col} TEXT`) } catch { /* already exists */ }
   }
 
+  // 创建 realtime_recordings 表
+  db.run(`
+    CREATE TABLE IF NOT EXISTS realtime_recordings (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      filePath TEXT NOT NULL,
+      fileSize INTEGER DEFAULT 0,
+      duration REAL DEFAULT 0,
+      wordCount INTEGER DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      text TEXT,
+      segments TEXT
+    )
+  `)
+
   return db
 }
 
@@ -121,7 +148,7 @@ function queryOne(d: SqlJsDatabase, sql: string, params: any[] = []): any | unde
 
 // ===== Task CRUD =====
 
-export async function createTask(file: { fileName: string; filePath: string; fileSize: number; duration: number; modelType?: string }): Promise<Task> {
+export async function createTask(file: { fileName: string; filePath: string; fileSize: number; duration: number; modelType?: string; status?: Task['status']; wordCount?: number }): Promise<Task> {
   const d = await getDb()
   const task: Task = {
     id: randomUUID(),
@@ -129,19 +156,19 @@ export async function createTask(file: { fileName: string; filePath: string; fil
     filePath: file.filePath,
     fileSize: file.fileSize,
     duration: file.duration,
-    status: 'pending',
+    status: file.status || 'pending',
     modelType: file.modelType || 'qwen3-asr',
     strategy: null,
     error: null,
     createdAt: new Date().toISOString(),
     completedAt: null,
     processingTime: null,
-    wordCount: null,
+    wordCount: file.wordCount ?? null,
   }
 
   d.run(
-    'INSERT INTO tasks (id, fileName, filePath, fileSize, duration, status, modelType, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [task.id, task.fileName, task.filePath, task.fileSize, task.duration, task.status, task.modelType, task.createdAt]
+    'INSERT INTO tasks (id, fileName, filePath, fileSize, duration, status, modelType, createdAt, wordCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [task.id, task.fileName, task.filePath, task.fileSize, task.duration, task.status, task.modelType, task.createdAt, task.wordCount]
   )
   saveDb()
   return task
@@ -178,6 +205,14 @@ export async function updateTask(id: string, updates: Partial<Pick<Task, 'status
 
 export async function deleteTask(id: string) {
   const d = await getDb()
+  // Clean up recording WAV file if in recordings directory
+  const task = await getTask(id)
+  if (task?.filePath) {
+    const recordingsDir = join(app.getPath('userData'), 'recordings')
+    if (task.filePath.startsWith(recordingsDir) && existsSync(task.filePath)) {
+      try { const { unlinkSync } = require('fs'); unlinkSync(task.filePath) } catch { /* ignore */ }
+    }
+  }
   d.run('DELETE FROM results WHERE taskId = ?', [id])
   d.run('DELETE FROM tasks WHERE id = ?', [id])
   saveDb()
@@ -219,6 +254,54 @@ export async function updateResultAnalysis(taskId: string, field: string, value:
   const allowed = ['aiSummary', 'aiSpeakers', 'aiMinutes', 'aiQa']
   if (!allowed.includes(field)) return
   d.run(`UPDATE results SET ${field} = ? WHERE taskId = ?`, [value, taskId])
+  saveDb()
+}
+
+// ===== RealtimeRecording CRUD =====
+
+export async function createRealtimeRecording(recording: {
+  title: string
+  filePath: string
+  fileSize: number
+  duration: number
+  wordCount: number
+  text: string
+  segments: any[]
+}): Promise<RealtimeRecording> {
+  const d = await getDb()
+  const rec: RealtimeRecording = {
+    id: randomUUID(),
+    title: recording.title,
+    filePath: recording.filePath,
+    fileSize: recording.fileSize,
+    duration: recording.duration,
+    wordCount: recording.wordCount,
+    createdAt: new Date().toISOString(),
+    text: recording.text,
+    segments: JSON.stringify(recording.segments),
+  }
+
+  d.run(
+    'INSERT INTO realtime_recordings (id, title, filePath, fileSize, duration, wordCount, createdAt, text, segments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [rec.id, rec.title, rec.filePath, rec.fileSize, rec.duration, rec.wordCount, rec.createdAt, rec.text, rec.segments]
+  )
+  saveDb()
+  return rec
+}
+
+export async function getAllRealtimeRecordings(): Promise<RealtimeRecording[]> {
+  const d = await getDb()
+  return queryAll(d, 'SELECT * FROM realtime_recordings ORDER BY createdAt DESC')
+}
+
+export async function getRealtimeRecording(id: string): Promise<RealtimeRecording | undefined> {
+  const d = await getDb()
+  return queryOne(d, 'SELECT * FROM realtime_recordings WHERE id = ?', [id])
+}
+
+export async function deleteRealtimeRecording(id: string) {
+  const d = await getDb()
+  d.run('DELETE FROM realtime_recordings WHERE id = ?', [id])
   saveDb()
 }
 

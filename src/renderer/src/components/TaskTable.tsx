@@ -3,7 +3,7 @@ import { Table, Input, Typography, Space, Tag, Button, Dropdown, Empty, Card, Ro
 import {
   SearchOutlined, EllipsisOutlined, LoadingOutlined, PlayCircleOutlined,
   CloseOutlined, DownloadOutlined, DeleteOutlined,
-  UnorderedListOutlined, AppstoreOutlined,
+  UnorderedListOutlined, AppstoreOutlined, AudioOutlined, ExperimentOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { Task } from '../stores/appStore'
@@ -32,6 +32,7 @@ function getModelLabel(modelType?: string): string {
   switch (modelType) {
     case 'qwen3-asr': return 'Qwen3-ASR'
     case 'sensevoice-small': return 'SenseVoice'
+    case 'streaming-zipformer-zh': return '实时录音'
     default: return modelType || '-'
   }
 }
@@ -54,6 +55,8 @@ function StatusTag({ status, themeMode }: { status: string; themeMode: 'default'
       completed: 'success',
       failed: 'error',
       stopped: 'warning',
+      pending_analysis: 'cyan',
+      recording: 'error',
     }
     const textMap: Record<string, string> = {
       processing: '处理中',
@@ -61,11 +64,13 @@ function StatusTag({ status, themeMode }: { status: string; themeMode: 'default'
       completed: '已完成',
       failed: '失败',
       stopped: '已取消',
+      pending_analysis: '待分析',
+      recording: '录音中',
     }
     return (
       <Tag
         color={colorMap[status] || 'default'}
-        icon={status === 'processing' ? <LoadingOutlined /> : undefined}
+        icon={status === 'processing' || status === 'recording' ? <LoadingOutlined /> : undefined}
       >
         {textMap[status] || status}
       </Tag>
@@ -79,11 +84,13 @@ function StatusTag({ status, themeMode }: { status: string; themeMode: 'default'
     completed: { color: '#27272a', text: '已完成' },
     failed: { color: '#3f3f46', text: '失败' },
     stopped: { color: '#52525b', text: '已取消' },
+    pending_analysis: { color: '#08979c', text: '待分析' },
+    recording: { color: '#ff4d4f', text: '录音中' },
   }
   const { color, text } = map[status] || { color: '#71717a', text: status }
   return (
     <Tag
-      icon={status === 'processing' ? <LoadingOutlined /> : undefined}
+      icon={status === 'processing' || status === 'recording' ? <LoadingOutlined /> : undefined}
       style={{ backgroundColor: color, borderColor: color, color: '#fff' }}
     >
       {text}
@@ -100,9 +107,11 @@ interface TaskTableProps {
   onDelete: (e: React.MouseEvent, id: string) => void
   onRestart: (e: React.MouseEvent, id: string) => void
   onCancel: (e: React.MouseEvent, id: string) => void
+  onExportAudio?: (e: React.MouseEvent, filePath: string) => void
+  onDeepAnalysis?: (e: React.MouseEvent, taskId: string) => void
 }
 
-export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail, onDelete, onRestart, onCancel }: TaskTableProps) {
+export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail, onDelete, onRestart, onCancel, onExportAudio, onDeepAnalysis }: TaskTableProps) {
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
 
@@ -133,6 +142,11 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
     if (task.status === 'completed') {
       items.push({ key: 'export', icon: <DownloadOutlined />, label: '导出 TXT' })
     }
+    if (task.status === 'pending_analysis') {
+      items.push({ key: 'deep-analysis', icon: <ExperimentOutlined />, label: '深度分析' })
+      items.push({ key: 'export-audio', icon: <AudioOutlined />, label: '导出音频' })
+      items.push({ key: 'export', icon: <DownloadOutlined />, label: '导出日志' })
+    }
     items.push({ type: 'divider' })
     items.push({ key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true })
     return items
@@ -144,6 +158,8 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
       case 'cancel': onCancel(e.domEvent, task.id); break
       case 'export': handleExport(task.id); break
       case 'delete': onDelete(e.domEvent, task.id); break
+      case 'export-audio': onExportAudio?.(e.domEvent, task.filePath); break
+      case 'deep-analysis': onDeepAnalysis?.(e.domEvent, task.id); break
     }
   }
 
@@ -194,12 +210,14 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
     completed: '#52c41a',
     failed: '#ff4d4f',
     stopped: '#faad14',
+    pending_analysis: '#13c2c2',
   } : {
     processing: '#18181b',
     pending: '#71717a',
     completed: '#27272a',
     failed: '#3f3f46',
     stopped: '#52525b',
+    pending_analysis: '#08979c',
   }
 
   return (
@@ -236,8 +254,8 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
           pagination={false}
           size="middle"
           onRow={(task) => ({
-            onClick: () => task.status === 'completed' && onViewDetail(task),
-            style: task.status === 'completed' ? { cursor: 'pointer' } : undefined,
+            onClick: () => (task.status === 'completed' || task.status === 'pending_analysis') && onViewDetail(task),
+            style: (task.status === 'completed' || task.status === 'pending_analysis') ? { cursor: 'pointer' } : undefined,
           })}
         />
       ) : (
@@ -245,8 +263,8 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
           {filtered.map(task => (
             <Col span={8} key={task.id}>
               <Card
-                hoverable={task.status === 'completed'}
-                onClick={() => task.status === 'completed' && onViewDetail(task)}
+                hoverable={task.status === 'completed' || task.status === 'pending_analysis'}
+                onClick={() => (task.status === 'completed' || task.status === 'pending_analysis') && onViewDetail(task)}
                 style={{
                   border: `1px solid ${statusBorderColor[task.status] || '#d9d9d9'}`,
                 }}

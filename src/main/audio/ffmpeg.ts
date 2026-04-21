@@ -22,8 +22,10 @@ export interface AudioInfo {
  */
 export function getAudioInfo(filePath: string): Promise<AudioInfo> {
   return new Promise((resolve, reject) => {
+    // Ensure file path is properly encoded for ffprobe
     ffmpeg.ffprobe(filePath, (err, metadata) => {
       if (err) {
+        console.error('FFprobe error for file:', filePath, err)
         reject(new Error(`无法读取文件信息: ${err.message}`))
         return
       }

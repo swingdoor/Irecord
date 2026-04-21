@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, protocol, net } from 'electron'
+import { app, BrowserWindow, Menu, protocol, net, desktopCapturer, session } from 'electron'
 import { join } from 'path'
 import { existsSync, statSync, readFileSync } from 'fs'
 import { Readable } from 'stream'
@@ -9,6 +9,9 @@ import { shutdownQueue, startQueue } from './taskQueue'
 import { getResourcePath } from './utils/paths'
 
 Menu.setApplicationMenu(null)
+
+// Enable audio processing features in Chromium
+app.commandLine.appendSwitch('enable-features', 'WebRtcAudioProcessing')
 
 // 注册自定义协议，用于安全访问本地音视频文件
 protocol.registerSchemesAsPrivileged([
@@ -44,6 +47,14 @@ function createWindow(): void {
     if (process.env.NODE_ENV === 'development' || process.env.ELECTRON_RENDERER_URL) {
       mainWindow?.webContents.openDevTools()
     }
+  })
+
+  // Enable system audio capture via getDisplayMedia
+  mainWindow.webContents.session.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+      // Auto-select the first screen source, enable audio
+      callback({ video: sources[0], enableLocalEcho: false })
+    })
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

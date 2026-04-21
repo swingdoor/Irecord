@@ -86,6 +86,85 @@ const electronAPI = {
     value: string
   }): Promise<{ success?: boolean; error?: string }> =>
     ipcRenderer.invoke('update-ai-analysis', params),
+
+  // ===== 实时录音 =====
+  checkStreamingModel: (): Promise<{ available: boolean }> =>
+    ipcRenderer.invoke('check-streaming-model'),
+
+  startRecording: (): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('start-recording'),
+
+  sendAudioChunk: (buffer: ArrayBuffer): void => {
+    ipcRenderer.send('audio-chunk', buffer)
+  },
+
+  stopRecording: (): Promise<{
+    text?: string
+    segments?: Array<{ text: string; startTime: number; endTime: number }>
+    filePath?: string
+    duration?: number
+    wordCount?: number
+    error?: string
+  }> => ipcRenderer.invoke('stop-recording'),
+
+  onRealtimeResult: (callback: (data: { text: string; startTime: number }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('realtime-result', handler)
+    return () => ipcRenderer.removeListener('realtime-result', handler)
+  },
+
+  onSegmentComplete: (callback: (data: { text: string; startTime: number; endTime: number }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('segment-complete', handler)
+    return () => ipcRenderer.removeListener('segment-complete', handler)
+  },
+
+  onRecordingError: (callback: (data: { message: string }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('recording-error', handler)
+    return () => ipcRenderer.removeListener('recording-error', handler)
+  },
+
+  startDeepAnalysis: (taskId: string): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('start-deep-analysis', taskId),
+
+  exportAudio: (filePath: string): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('export-audio', filePath),
+
+  // ===== Realtime Recording =====
+  getRealtimeRecordings: (): Promise<any[]> =>
+    ipcRenderer.invoke('get-realtime-recordings'),
+
+  getRealtimeRecording: (id: string): Promise<{ recording?: any; error?: string }> =>
+    ipcRenderer.invoke('get-realtime-recording', id),
+
+  deleteRealtimeRecording: (id: string): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('delete-realtime-recording', id),
+
+  exportRealtimeRecordingWav: (filePath: string): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('export-realtime-recording-wav', filePath),
+
+  exportRealtimeRecordingTxt: (params: {
+    text: string
+    includeTimestamps: boolean
+    segments?: Array<{ text: string; start: number; end: number }>
+  }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('export-realtime-recording-txt', params),
+
+  createProofreadingTask: (recordingId: string): Promise<{ taskId?: string; error?: string }> =>
+    ipcRenderer.invoke('create-proofreading-task', recordingId),
+
+  saveRealtimeRecording: (params: {
+    title: string
+    filePath: string
+    fileSize: number
+    duration: number
+    wordCount: number
+    text: string
+    segments: Array<{ text: string; start: number; end: number }>
+    createProofreadingTask: boolean
+  }): Promise<{ recordingId?: string; taskId?: string; error?: string }> =>
+    ipcRenderer.invoke('save-realtime-recording', params),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

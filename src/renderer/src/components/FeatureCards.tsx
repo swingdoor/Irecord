@@ -5,9 +5,11 @@ const { Text } = Typography
 
 interface FeatureCardsProps {
   onUpload: () => void
+  onRecord: () => void
+  streamingModelAvailable: boolean
 }
 
-export function FeatureCards({ onUpload }: FeatureCardsProps) {
+export function FeatureCards({ onUpload, onRecord, streamingModelAvailable }: FeatureCardsProps) {
   return (
     <Row gutter={16}>
       <Col span={8}>
@@ -18,7 +20,9 @@ export function FeatureCards({ onUpload }: FeatureCardsProps) {
               <Text strong>实时录音</Text>
             </Space>
             <Text type="secondary">实时语音转文字，支持区分说话人</Text>
-            <Button block disabled>即将推出</Button>
+            <Button block disabled={!streamingModelAvailable} onClick={onRecord}>
+              {streamingModelAvailable ? '开始录音' : '需要下载流式模型'}
+            </Button>
           </Space>
         </Card>
       </Col>

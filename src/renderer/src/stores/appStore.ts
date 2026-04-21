@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type AppPage = 'taskList' | 'taskDetail'
+export type AppPage = 'taskList' | 'taskDetail' | 'recording' | 'realtimeRecordingDetail'
 
 export interface Task {
   id: string
@@ -8,7 +8,7 @@ export interface Task {
   filePath: string
   fileSize: number
   duration: number
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'stopped'
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'stopped' | 'pending_analysis' | 'recording'
   modelType: string
   strategy: string | null
   error: string | null
@@ -16,6 +16,18 @@ export interface Task {
   completedAt: string | null
   processingTime: number | null
   wordCount: number | null
+}
+
+export interface RealtimeRecording {
+  id: string
+  title: string
+  filePath: string
+  fileSize: number
+  duration: number
+  wordCount: number
+  createdAt: string
+  text: string
+  segments: string
 }
 
 export interface TaskResultData {
@@ -47,6 +59,19 @@ interface AppState {
 
   currentTask: Task | null
   setCurrentTask: (task: Task | null) => void
+
+  realtimeRecordings: RealtimeRecording[]
+  setRealtimeRecordings: (recordings: RealtimeRecording[]) => void
+  refreshRealtimeRecordings: () => Promise<void>
+
+  currentRealtimeRecordingId: string | null
+  setCurrentRealtimeRecordingId: (id: string | null) => void
+
+  currentRealtimeRecording: RealtimeRecording | null
+  setCurrentRealtimeRecording: (recording: RealtimeRecording | null) => void
+
+  activeTab: string
+  setActiveTab: (tab: string) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -68,4 +93,20 @@ export const useAppStore = create<AppState>((set) => ({
 
   currentTask: null,
   setCurrentTask: (currentTask) => set({ currentTask }),
+
+  realtimeRecordings: [],
+  setRealtimeRecordings: (realtimeRecordings) => set({ realtimeRecordings }),
+  refreshRealtimeRecordings: async () => {
+    const recordings = await window.electronAPI.getRealtimeRecordings()
+    set({ realtimeRecordings: recordings })
+  },
+
+  currentRealtimeRecordingId: null,
+  setCurrentRealtimeRecordingId: (currentRealtimeRecordingId) => set({ currentRealtimeRecordingId }),
+
+  currentRealtimeRecording: null,
+  setCurrentRealtimeRecording: (currentRealtimeRecording) => set({ currentRealtimeRecording }),
+
+  activeTab: 'realtime',
+  setActiveTab: (activeTab) => set({ activeTab }),
 }))

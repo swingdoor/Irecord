@@ -149,6 +149,14 @@ async function processNext(win: BrowserWindow) {
   } catch (err: any) {
     if (tempWavPath) { deleteTempFile(tempWavPath) }
 
+    // Log full error for debugging
+    console.error('Task processing error:', {
+      taskId: task.id,
+      filePath: task.filePath,
+      error: err.message,
+      stack: err.stack
+    })
+
     // 主动取消时 cancelCurrentTask 已设置 stopped，不再覆盖为 failed
     if (!canceledFlag) {
       await updateTask(task.id, {
