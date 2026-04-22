@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Table, Input, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Segmented } from 'antd'
+import { Table, Input, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Segmented, Modal } from 'antd'
 import {
   SearchOutlined, EllipsisOutlined, LoadingOutlined, PlayCircleOutlined,
   CloseOutlined, DownloadOutlined, DeleteOutlined,
@@ -157,7 +157,16 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
       case 'restart': onRestart(e.domEvent, task.id); break
       case 'cancel': onCancel(e.domEvent, task.id); break
       case 'export': handleExport(task.id); break
-      case 'delete': onDelete(e.domEvent, task.id); break
+      case 'delete':
+        Modal.confirm({
+          title: '确定删除此任务？',
+          content: '删除后无法恢复',
+          okText: '删除',
+          okType: 'danger',
+          cancelText: '取消',
+          onOk: () => onDelete(e.domEvent, task.id),
+        })
+        break
       case 'export-audio': onExportAudio?.(e.domEvent, task.filePath); break
       case 'deep-analysis': onDeepAnalysis?.(e.domEvent, task.id); break
     }
@@ -168,7 +177,7 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
       title: '文件名称',
       dataIndex: 'fileName',
       key: 'fileName',
-      width: 280,
+      width: '25%',
       ellipsis: true,
       render: (_: string, task: Task) => (
         <div>
@@ -179,13 +188,13 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
         </div>
       ),
     },
-    { title: '时长', dataIndex: 'duration', key: 'duration', width: 80, render: (d: number) => formatDuration(d) },
-    { title: '字数', dataIndex: 'wordCount', key: 'wordCount', width: 80, render: (w: number | null) => w != null ? w.toLocaleString() : '-' },
-    { title: '耗时', dataIndex: 'processingTime', key: 'processingTime', width: 80, render: (t: number | null) => t != null ? formatDuration(t) : '-' },
-    { title: '模型', dataIndex: 'modelType', key: 'modelType', width: 110, render: (m: string) => getModelLabel(m) },
-    { title: '日期', dataIndex: 'createdAt', key: 'createdAt', width: 155, render: (d: string) => formatDate(d) },
+    { title: '时长', dataIndex: 'duration', key: 'duration', width: '8%', render: (d: number) => formatDuration(d) },
+    { title: '字数', dataIndex: 'wordCount', key: 'wordCount', width: '8%', render: (w: number | null) => w != null ? w.toLocaleString() : '-' },
+    { title: '耗时', dataIndex: 'processingTime', key: 'processingTime', width: '8%', render: (t: number | null) => t != null ? formatDuration(t) : '-' },
+    { title: '模型', dataIndex: 'modelType', key: 'modelType', width: '12%', render: (m: string) => getModelLabel(m) },
+    { title: '日期', dataIndex: 'createdAt', key: 'createdAt', width: '17%', render: (d: string) => formatDate(d) },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: 120,
+      title: '状态', dataIndex: 'status', key: 'status', width: '12%',
       render: (status: string) => (
         <Space size={4}>
           <StatusTag status={status} themeMode={themeMode} />
@@ -194,7 +203,7 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
       ),
     },
     {
-      title: '', key: 'actions', width: 48,
+      title: '操作', key: 'actions', width: '10%',
       render: (_: any, task: Task) => (
         <Dropdown menu={{ items: getMenuItems(task), onClick: (e) => handleMenuClick(task, e.key, e) }} trigger={['click']}>
           <Button type="text" size="small" icon={<EllipsisOutlined />} onClick={e => e.stopPropagation()} />
@@ -222,8 +231,7 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Text strong style={{ fontSize: 16 }}>最近录音</Text>
+      <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', marginBottom: 16 }}>
         <Space>
           <Input
             placeholder="搜索文件..."
@@ -251,8 +259,9 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
           dataSource={filtered}
           columns={columns}
           rowKey="id"
-          pagination={false}
-          size="middle"
+          size="small"
+          pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
+          locale={{ emptyText: search ? '没有匹配的文件' : '暂无任务，上传音视频文件开始' }}
           onRow={(task) => ({
             onClick: () => (task.status === 'completed' || task.status === 'pending_analysis') && onViewDetail(task),
             style: (task.status === 'completed' || task.status === 'pending_analysis') ? { cursor: 'pointer' } : undefined,

@@ -1,14 +1,12 @@
 import { useCallback, useState, useEffect } from 'react'
-import { Button, Space, Typography, message, Modal, Checkbox, Card, Dropdown } from 'antd'
-import { ArrowLeftOutlined, AudioOutlined, PauseCircleOutlined, PlayCircleOutlined, StopOutlined, SettingOutlined, CheckOutlined, DownloadOutlined, CopyOutlined } from '@ant-design/icons'
+import { Button, Space, Typography, message, Modal, Checkbox, Card } from 'antd'
+import { ArrowLeftOutlined, AudioOutlined, PauseCircleOutlined, PlayCircleOutlined, StopOutlined, DownloadOutlined, CopyOutlined } from '@ant-design/icons'
 import { useRecording } from '../hooks/useRecording'
 import { WaveformVisualizer } from '../components/WaveformVisualizer'
 import { RealtimeTranscript } from '../components/RealtimeTranscript'
 import { useAppStore } from '../stores/appStore'
 
 const { Title, Text } = Typography
-
-export type AudioSource = 'microphone' | 'speaker' | 'both'
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -48,13 +46,11 @@ export default function RecordingPage() {
   const [recordingDate] = useState(() => new Date())
   const [confirmModalOpen, setConfirmModalOpen] = useState(false)
   const [enableProofreading, setEnableProofreading] = useState(true)
-  const [audioSource, setAudioSource] = useState<AudioSource>('microphone')
 
   const isRecording = status === 'recording'
   const isPaused = status === 'paused'
   const isIdle = status === 'idle'
   const isInitializing = status === 'initializing'
-  const supportsSystemAudio = typeof navigator.mediaDevices?.getDisplayMedia === 'function'
 
   const handleBack = useCallback(() => {
     if (isRecording || isPaused) {
@@ -196,7 +192,7 @@ export default function RecordingPage() {
                 shape="circle"
                 size="large"
                 icon={<AudioOutlined />}
-                onClick={() => start(audioSource)}
+                onClick={() => start()}
                 loading={isInitializing}
                 disabled={isInitializing}
                 style={{ width: 40, height: 40 }}
@@ -270,55 +266,6 @@ export default function RecordingPage() {
                 <Text type="warning" style={{ fontSize: 12, marginTop: 4 }}>已暂停</Text>
               )}
             </div>
-
-            {/* Audio Source Settings */}
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: 'microphone',
-                    label: (
-                      <Space>
-                        {audioSource === 'microphone' && <CheckOutlined />}
-                        <span>麦克风</span>
-                      </Space>
-                    ),
-                    onClick: () => setAudioSource('microphone')
-                  },
-                  {
-                    key: 'speaker',
-                    label: (
-                      <Space>
-                        {audioSource === 'speaker' && <CheckOutlined />}
-                        <span>扬声器{!supportsSystemAudio ? '（不支持）' : ''}</span>
-                      </Space>
-                    ),
-                    disabled: !supportsSystemAudio,
-                    onClick: () => setAudioSource('speaker')
-                  },
-                  {
-                    key: 'both',
-                    label: (
-                      <Space>
-                        {audioSource === 'both' && <CheckOutlined />}
-                        <span>麦克风+扬声器{!supportsSystemAudio ? '（不支持）' : ''}</span>
-                      </Space>
-                    ),
-                    disabled: !supportsSystemAudio,
-                    onClick: () => setAudioSource('both')
-                  }
-                ]
-              }}
-              placement="bottomRight"
-              disabled={isRecording || isPaused}
-            >
-              <Button
-                type="text"
-                icon={<SettingOutlined />}
-                disabled={isRecording || isPaused}
-                style={{ padding: '4px 8px' }}
-              />
-            </Dropdown>
           </div>
         </div>
 

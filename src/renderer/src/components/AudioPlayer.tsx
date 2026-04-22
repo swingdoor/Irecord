@@ -109,7 +109,6 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ ur
       ws.on('error', async () => {
         // 原始文件播放失败，尝试转换为 WAV
         if (!destroyed && !convertedUrl && !converting) {
-          console.warn('[AudioPlayer] Playback failed, converting to WAV...')
           setConverting(true)
           ws.destroy()
           wsRef.current = null

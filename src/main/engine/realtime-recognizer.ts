@@ -6,6 +6,7 @@ import { OnlineRecognizer, OnlineStream } from 'sherpa-onnx-node'
 import { getModelsPath, checkStreamingZipformerModelExists, getStreamingZipformerModelPath } from '../utils/paths'
 import { getRealtimeParams } from '../utils/settings'
 import { IRealtimeRecognizer, RealtimeSegment, RecognitionResult } from './IRealtimeRecognizer'
+import { createWavHeader, writeAudioToWav } from '../audio/wavUtils'
 
 const MAX_RECORDING_DURATION_MS = 30 * 60 * 1000 // 30 minutes
 
@@ -106,33 +107,10 @@ export class RealtimeRecognizer implements IRealtimeRecognizer {
       throw new Error('Recording duration limit reached (30 minutes)')
     }
 
-    // Log audio data for debugging (only first time)
-    if (this.totalSamplesWritten === 0) {
-      console.log('[RealtimeRecognizer] First audio chunk received:', {
-        length: audioData.length,
-        sampleRate: this.sampleRate,
-        firstSamples: Array.from(audioData.slice(0, 10))
-      })
-    }
-
-    // Log every 100 chunks to monitor audio flow
-    if (this.totalSamplesWritten % (audioData.length * 100) === 0) {
-      console.log('[RealtimeRecognizer] Audio chunks received:', {
-        totalSamples: this.totalSamplesWritten,
-        durationSeconds: this.totalSamplesWritten / this.sampleRate
-      })
-    }
-
     // Stream write audio to WAV file immediately
     if (this.wavFd !== null) {
-      const int16Buf = Buffer.alloc(audioData.length * 2)
-      for (let i = 0; i < audioData.length; i++) {
-        const sample = Math.max(-1, Math.min(1, audioData[i]))
-        const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7FFF
-        int16Buf.writeInt16LE(int16, i * 2)
-      }
-      writeSync(this.wavFd, int16Buf, 0, int16Buf.length, 44 + this.totalSamplesWritten * 2)
-      this.totalSamplesWritten += audioData.length
+      const samplesWritten = writeAudioToWav(this.wavFd, audioData, 44 + this.totalSamplesWritten * 2)
+      this.totalSamplesWritten += samplesWritten
     }
 
     // Feed to recognizer
@@ -216,7 +194,7 @@ export class RealtimeRecognizer implements IRealtimeRecognizer {
     // Patch WAV header with correct sizes
     if (this.wavFd !== null) {
       const dataSize = this.totalSamplesWritten * 2
-      const header = this.createWavHeader(this.sampleRate, dataSize)
+      const header = createWavHeader(this.sampleRate, dataSize)
       writeSync(this.wavFd, header, 0, 44, 0)
       closeSync(this.wavFd)
       this.wavFd = null
@@ -239,59 +217,6 @@ export class RealtimeRecognizer implements IRealtimeRecognizer {
     this.recognizer = null
     this.stream = null
     this.segments = []
-  }
-
-  /**
-   * Create WAV header
-   */
-  private createWavHeader(sampleRate: number, dataSize: number): Buffer {
-    const numChannels = 1
-    const bitsPerSample = 16
-    const byteRate = sampleRate * numChannels * (bitsPerSample / 8)
-    const blockAlign = numChannels * (bitsPerSample / 8)
-
-    const buffer = Buffer.alloc(44)
-
-    // RIFF header
-    buffer.write('RIFF', 0)
-    buffer.writeUInt32LE(36 + dataSize, 4)
-    buffer.write('WAVE', 8)
-
-    // fmt chunk
-    buffer.write('fmt ', 12)
-    buffer.writeUInt32LE(16, 16)
-    buffer.writeUInt16LE(1, 20)
-    buffer.writeUInt16LE(numChannels, 22)
-    buffer.writeUInt32LE(sampleRate, 24)
-    buffer.writeUInt32LE(byteRate, 28)
-    buffer.writeUInt16LE(blockAlign, 32)
-    buffer.writeUInt16LE(bitsPerSample, 34)
-
-    // data chunk
-    buffer.write('data', 36)
-    buffer.writeUInt32LE(dataSize, 40)
-
-    return buffer
-  }
-
-  /**
-   * Destroy recognizer and free resources
-   */
-  destroy(): void {
-    if (this.wavFd !== null) {
-      try { closeSync(this.wavFd) } catch { /* ignore */ }
-      this.wavFd = null
-    }
-    this.recognizer = null
-    this.stream = null
-    this.segments = []
-  }
-
-  /**
-   * Check if recording duration limit is reached
-   */
-  isLimitReached(): boolean {
-    return Date.now() - this.recordingStartTime > MAX_RECORDING_DURATION_MS
   }
 }
 

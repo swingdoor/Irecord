@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 
 export type RecordingStatus = 'idle' | 'initializing' | 'recording' | 'paused' | 'stopped'
-export type AudioSource = 'microphone' | 'speaker' | 'both'
 
 export interface RecordingSegment {
   text: string
@@ -71,7 +70,7 @@ export function useRecording() {
   // Cleanup on unmount
   useEffect(() => cleanup, [cleanup])
 
-  const start = useCallback(async (audioSource: AudioSource = 'microphone') => {
+  const start = useCallback(async () => {
     setState(prev => ({ ...prev, status: 'initializing', error: null, segments: [], currentText: '', currentSegmentStartTime: 0, finalText: '', finalSegments: [], filePath: null }))
 
     try {
@@ -88,7 +87,6 @@ export function useRecording() {
         audioGain = engineConfig.zipformerParams?.audioGain ?? settings.realtimeParams?.audioGain ?? 2.0
       }
 
-      console.log('[useRecording] Using engine:', engine, 'with gain:', audioGain)
 
       // Start recognizer in main process
       const res = await window.electronAPI.startRecording()
@@ -97,108 +95,27 @@ export function useRecording() {
         return
       }
 
-      let mediaStream: MediaStream
-
-      // Get audio stream based on source selection
-      if (audioSource === 'microphone') {
-        // Microphone only
-        const constraints = {
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1
-          }
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1
         }
-        console.log('[useRecording] Requesting microphone with constraints:', constraints)
-        mediaStream = await navigator.mediaDevices.getUserMedia(constraints)
-
-        // Verify actual settings applied
-        const audioTrack = mediaStream.getAudioTracks()[0]
-        const settings = audioTrack.getSettings()
-        console.log('[useRecording] Actual audio track settings:', {
-          echoCancellation: settings.echoCancellation,
-          noiseSuppression: settings.noiseSuppression,
-          autoGainControl: settings.autoGainControl,
-          sampleRate: settings.sampleRate,
-          channelCount: settings.channelCount
-        })
-      } else if (audioSource === 'speaker') {
-        // System audio (speaker) only via Electron desktopCapturer
-        console.log('[useRecording] Requesting system audio')
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,  // Required by Electron, will be discarded
-          audio: true
-        })
-        // Remove video track, keep only audio
-        displayStream.getVideoTracks().forEach(t => t.stop())
-        mediaStream = new MediaStream(displayStream.getAudioTracks())
-      } else {
-        // Both microphone and speaker
-        console.log('[useRecording] Requesting both microphone and system audio')
-        const micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1
-          }
-        })
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true
-        })
-        displayStream.getVideoTracks().forEach(t => t.stop())
-        const speakerStream = new MediaStream(displayStream.getAudioTracks())
-
-        // Mix both streams
-        const audioContext = new AudioContext({ sampleRate: 16000 })
-        const micSource = audioContext.createMediaStreamSource(micStream)
-        const speakerSource = audioContext.createMediaStreamSource(speakerStream)
-        const destination = audioContext.createMediaStreamDestination()
-
-        micSource.connect(destination)
-        speakerSource.connect(destination)
-
-        mediaStream = destination.stream
-        audioContextRef.current = audioContext
-      }
+      })
 
       streamRef.current = mediaStream
 
-      const tracks = mediaStream.getTracks()
-      console.log('[useRecording] MediaStream tracks:', tracks.map(t => ({
-        kind: t.kind,
-        label: t.label,
-        enabled: t.enabled,
-        muted: t.muted,
-        readyState: t.readyState,
-        settings: t.getSettings()
-      })))
+      // Create AudioContext at 16kHz for recognition model
+      const audioContext = new AudioContext({ sampleRate: 16000 })
+      audioContextRef.current = audioContext
 
-      // Create AudioContext if not already created (for 'both' mode)
-      // Use 16kHz for recognition model
-      let audioContext = audioContextRef.current
-      if (!audioContext) {
-        audioContext = new AudioContext({ sampleRate: 16000 })
-        audioContextRef.current = audioContext
-        console.log('[useRecording] AudioContext created:', {
-          sampleRate: audioContext.sampleRate,
-          state: audioContext.state
-        })
-      }
-
-      // Create source only if not in 'both' mode (already created)
-      let source = sourceRef.current
-      if (!source) {
-        source = audioContext.createMediaStreamSource(mediaStream)
-        sourceRef.current = source
-      }
+      const source = audioContext.createMediaStreamSource(mediaStream)
+      sourceRef.current = source
 
       // Add gain node to boost audio level
       const gainNode = audioContext.createGain()
       gainNode.gain.value = audioGain
-      console.log('[useRecording] Audio gain set to:', audioGain)
 
       const analyser = audioContext.createAnalyser()
       analyser.fftSize = 2048
@@ -209,21 +126,8 @@ export function useRecording() {
       const workletNode = new AudioWorkletNode(audioContext, 'audio-chunk-processor')
       workletNodeRef.current = workletNode
 
-      let chunkCount = 0
-      const actualSampleRate = audioContext.sampleRate
       workletNode.port.onmessage = (e) => {
         const channelData = e.data as Float32Array
-
-        // Log first few chunks to verify audio data
-        if (chunkCount < 5) {
-          console.log(`[useRecording] Received chunk ${chunkCount}:`, {
-            length: channelData.length,
-            sampleRate: actualSampleRate,
-            max: Math.max(...channelData),
-            min: Math.min(...channelData)
-          })
-          chunkCount++
-        }
 
         // Create a new Float32Array to avoid detached buffer issue
         const copy = new Float32Array(channelData.length)
@@ -248,7 +152,6 @@ export function useRecording() {
       })
       const unsubSegment = window.electronAPI.onSegmentComplete((data) => {
         if (data.text && data.text.trim()) {
-          console.log('[useRecording] Segment received:', data)
           setState(prev => ({
             ...prev,
             segments: [...prev.segments, {

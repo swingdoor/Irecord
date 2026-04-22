@@ -1,9 +1,9 @@
-import { app, BrowserWindow, Menu, protocol, net, desktopCapturer, session } from 'electron'
+import { app, BrowserWindow, Menu, protocol } from 'electron'
 import { join } from 'path'
 import { existsSync, statSync, readFileSync } from 'fs'
 import { Readable } from 'stream'
 import { cleanupOldTempFiles, cleanupTempFiles } from './audio/temp'
-import { registerIpcHandlers } from './ipc'
+import { registerIpcHandlers } from './ipc/index'
 import { closeDb, resetStaleTasks } from './db/database'
 import { shutdownQueue, startQueue } from './taskQueue'
 import { getResourcePath } from './utils/paths'
@@ -49,14 +49,6 @@ function createWindow(): void {
     }
   })
 
-  // Enable system audio capture via getDisplayMedia
-  mainWindow.webContents.session.setDisplayMediaRequestHandler((_request, callback) => {
-    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-      // Auto-select the first screen source, enable audio
-      callback({ video: sources[0], enableLocalEcho: false })
-    })
-  })
-
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
@@ -70,19 +62,12 @@ app.whenReady().then(async () => {
     const parsed = new URL(request.url)
     const filePath = decodeURIComponent(parsed.pathname).replace(/^\//, '')
 
-    console.log('[local-file] Request:', request.url)
-    console.log('[local-file] File path:', filePath)
-    console.log('[local-file] Range header:', request.headers.get('Range'))
-
     if (!existsSync(filePath)) {
-      console.error('[local-file] File not found:', filePath)
       return new Response('Not Found', { status: 404 })
     }
 
     const buffer = readFileSync(filePath)
     const total = buffer.length
-
-    console.log('[local-file] File size:', total)
 
     // 根据扩展名推断 MIME
     const ext = filePath.split('.').pop()?.toLowerCase() || ''
@@ -93,8 +78,6 @@ app.whenReady().then(async () => {
     }
     const contentType = mimeMap[ext] || 'application/octet-stream'
 
-    console.log('[local-file] Content-Type:', contentType)
-
     const rangeHeader = request.headers.get('Range')
     if (rangeHeader) {
       const match = rangeHeader.match(/bytes=(\d+)-(\d*)/)
@@ -102,7 +85,6 @@ app.whenReady().then(async () => {
         const start = parseInt(match[1], 10)
         const end = match[2] ? parseInt(match[2], 10) : total - 1
         const chunk = buffer.slice(start, end + 1)
-        console.log('[local-file] Range response:', start, '-', end, '/', total)
         return new Response(chunk, {
           status: 206,
           headers: {
@@ -115,7 +97,6 @@ app.whenReady().then(async () => {
       }
     }
 
-    console.log('[local-file] Full response')
     return new Response(buffer, {
       status: 200,
       headers: {

@@ -60,7 +60,6 @@ export function cleanupOldTempFiles(maxAgeMs: number = 3600000): void {
         const age = now - stats.mtimeMs
         if (age > maxAgeMs) {
           unlinkSync(filePath)
-          console.log(`已清理过期临时文件: ${file}`)
         }
       } catch (err) {
         console.error(`无法处理临时文件 ${filePath}:`, err)
