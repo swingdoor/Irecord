@@ -122,7 +122,11 @@ export function useRecording() {
       analyserRef.current = analyser
 
       // Use AudioWorklet for audio processing
-      await audioContext.audioWorklet.addModule('/audio-processor.worklet.js')
+      // 开发模式用绝对路径，打包后用相对于 index.html 的路径
+      const workletPath = import.meta.env.DEV
+        ? '/audio-processor.worklet.js'
+        : new URL('./audio-processor.worklet.js', window.location.href).href
+      await audioContext.audioWorklet.addModule(workletPath)
       const workletNode = new AudioWorkletNode(audioContext, 'audio-chunk-processor')
       workletNodeRef.current = workletNode
 
