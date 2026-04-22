@@ -139,6 +139,54 @@ const electronAPI = {
     createProofreadingTask: boolean
   }): Promise<{ recordingId?: string; taskId?: string; error?: string }> =>
     ipcRenderer.invoke('save-realtime-recording', params),
+
+  // ===== 知识整理 =====
+  createKnowledgeDoc: (params: {
+    sourceIds: Array<{ type: 'task' | 'realtime'; id: string }>
+    templateId: string
+  }): Promise<{ docId?: string; error?: string }> =>
+    ipcRenderer.invoke('create-knowledge-doc', params),
+  getKnowledgeDocs: (): Promise<{ docs?: any[]; error?: string }> =>
+    ipcRenderer.invoke('get-knowledge-docs'),
+  getKnowledgeDoc: (docId: string): Promise<{ doc?: any; error?: string }> =>
+    ipcRenderer.invoke('get-knowledge-doc', docId),
+  updateKnowledgeDoc: (params: {
+    docId: string
+    title?: string
+    content?: string
+  }): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('update-knowledge-doc', params),
+  deleteKnowledgeDoc: (docId: string): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('delete-knowledge-doc', docId),
+
+  // ===== 模板管理 =====
+  getTemplates: (): Promise<{ templates?: any[]; error?: string }> =>
+    ipcRenderer.invoke('get-templates'),
+  createTemplate: (params: { name: string; prompt: string }): Promise<{ template?: any; error?: string }> =>
+    ipcRenderer.invoke('create-template', params),
+  updateTemplate: (params: {
+    templateId: string
+    name?: string
+    prompt?: string
+  }): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('update-template', params),
+  deleteTemplate: (templateId: string): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('delete-template', templateId),
+
+  // ===== 润色 =====
+  polishText: (params: {
+    text: string
+    type: 'polish' | 'rewrite' | 'expand'
+  }): Promise<{ result?: string; error?: string }> =>
+    ipcRenderer.invoke('polish-text', params),
+
+  // ===== 知识文档导出 =====
+  exportKnowledgeMarkdown: (params: { title: string; content: string }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('export-knowledge-markdown', params),
+  exportKnowledgeTxt: (params: { title: string; content: string }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('export-knowledge-txt', params),
+  exportKnowledgePdf: (params: { title: string; content: string }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('export-knowledge-pdf', params),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

@@ -185,3 +185,37 @@ export function getAskPrompt(text: string, question: string) {
     user: `以下是转写文本：\n\n${text}\n\n---\n用户提问：${question}`
   }
 }
+
+// ===== 知识整理 - 文档生成 =====
+
+export function getKnowledgeDocPrompt(templatePrompt: string, texts: string[]) {
+  const combined = texts.map((t, i) => `--- 素材 ${i + 1} ---\n${t}`).join('\n\n')
+  return {
+    system: templatePrompt + `
+
+**输出格式要求**：
+请直接输出 HTML 格式的文档内容，使用以下标签：
+- 标题用 <h1>、<h2>、<h3>
+- 段落用 <p>
+- 粗体用 <strong>，斜体用 <em>
+- 无序列表用 <ul><li>，有序列表用 <ol><li>
+- 引用用 <blockquote><p>
+- 分割线用 <hr>
+不要包含 <html>、<head>、<body> 等外层标签，不要包含 \`\`\`html 代码块标记，直接输出内容标签。`,
+    user: `以下是需要整理的语音转写内容：\n\n${combined}`
+  }
+}
+
+// ===== 知识整理 - 局部润色 =====
+
+export function getPolishPrompt(text: string, type: 'polish' | 'rewrite' | 'expand') {
+  const instructions: Record<string, string> = {
+    polish: '请对以下文字进行润色，优化表达，使语言更加流畅自然，但保持原意不变。',
+    rewrite: '请用不同的方式改写以下文字，保持核心含义但换一种表达方式。',
+    expand: '请对以下文字进行扩写，补充细节和论述，使内容更加丰富完整。',
+  }
+  return {
+    system: instructions[type] + '\n\n直接输出修改后的文字，不要包含任何解释或标记。',
+    user: text
+  }
+}

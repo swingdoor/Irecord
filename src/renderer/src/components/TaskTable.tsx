@@ -153,6 +153,7 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
   }
 
   const handleMenuClick = (task: Task, key: string, e: any) => {
+    e.domEvent?.stopPropagation()
     switch (key) {
       case 'restart': onRestart(e.domEvent, task.id); break
       case 'cancel': onCancel(e.domEvent, task.id); break

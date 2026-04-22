@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type AppPage = 'taskList' | 'taskDetail' | 'recording' | 'realtimeRecordingDetail'
+export type AppPage = 'taskList' | 'taskDetail' | 'recording' | 'realtimeRecordingDetail' | 'knowledgeDetail'
 
 export interface Task {
   id: string
@@ -28,6 +28,27 @@ export interface RealtimeRecording {
   createdAt: string
   text: string
   segments: string
+}
+
+export interface KnowledgeDoc {
+  id: string
+  title: string
+  content: string
+  status: 'generating' | 'completed' | 'failed'
+  templateId: string
+  sourceIds: string
+  error: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface KnowledgeTemplate {
+  id: string
+  name: string
+  prompt: string
+  builtin: number
+  createdAt: string
+  updatedAt: string
 }
 
 export interface TaskResultData {
@@ -70,6 +91,20 @@ interface AppState {
   currentRealtimeRecording: RealtimeRecording | null
   setCurrentRealtimeRecording: (recording: RealtimeRecording | null) => void
 
+  knowledgeDocs: KnowledgeDoc[]
+  setKnowledgeDocs: (docs: KnowledgeDoc[]) => void
+  refreshKnowledgeDocs: () => Promise<void>
+
+  currentKnowledgeDocId: string | null
+  setCurrentKnowledgeDocId: (id: string | null) => void
+
+  currentKnowledgeDoc: KnowledgeDoc | null
+  setCurrentKnowledgeDoc: (doc: KnowledgeDoc | null) => void
+
+  templates: KnowledgeTemplate[]
+  setTemplates: (templates: KnowledgeTemplate[]) => void
+  refreshTemplates: () => Promise<void>
+
   activeTab: string
   setActiveTab: (tab: string) => void
 }
@@ -106,6 +141,26 @@ export const useAppStore = create<AppState>((set) => ({
 
   currentRealtimeRecording: null,
   setCurrentRealtimeRecording: (currentRealtimeRecording) => set({ currentRealtimeRecording }),
+
+  knowledgeDocs: [],
+  setKnowledgeDocs: (knowledgeDocs) => set({ knowledgeDocs }),
+  refreshKnowledgeDocs: async () => {
+    const res = await window.electronAPI.getKnowledgeDocs()
+    if (res.docs) set({ knowledgeDocs: res.docs })
+  },
+
+  currentKnowledgeDocId: null,
+  setCurrentKnowledgeDocId: (currentKnowledgeDocId) => set({ currentKnowledgeDocId }),
+
+  currentKnowledgeDoc: null,
+  setCurrentKnowledgeDoc: (currentKnowledgeDoc) => set({ currentKnowledgeDoc }),
+
+  templates: [],
+  setTemplates: (templates) => set({ templates }),
+  refreshTemplates: async () => {
+    const res = await window.electronAPI.getTemplates()
+    if (res.templates) set({ templates: res.templates })
+  },
 
   activeTab: 'realtime',
   setActiveTab: (activeTab) => set({ activeTab }),

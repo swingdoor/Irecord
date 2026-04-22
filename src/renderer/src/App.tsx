@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { ConfigProvider, Modal } from 'antd'
+import { ConfigProvider, Modal, App as AntApp } from 'antd'
 import { useAppStore } from './stores/appStore'
 import TaskListPage from './pages/TaskListPage'
 import TaskDetailPage from './pages/TaskDetailPage'
 import RecordingPage from './pages/RecordingPage'
 import RealtimeRecordingDetailPage from './pages/RealtimeRecordingDetailPage'
+import KnowledgeDetailPage from './pages/KnowledgeDetailPage'
 
 function App() {
   const page = useAppStore((state) => state.page)
@@ -94,10 +95,13 @@ function App() {
 
   return (
     <ConfigProvider theme={themeConfig}>
-      {page === 'taskList' && <TaskListPage themeMode={themeMode} onThemeChange={setThemeMode} />}
-      {page === 'taskDetail' && <TaskDetailPage />}
-      {page === 'recording' && <RecordingPage />}
-      {page === 'realtimeRecordingDetail' && <RealtimeRecordingDetailPage />}
+      <AntApp>
+        {page === 'taskList' && <TaskListPage themeMode={themeMode} onThemeChange={setThemeMode} />}
+        {page === 'taskDetail' && <TaskDetailPage />}
+        {page === 'recording' && <RecordingPage />}
+        {page === 'realtimeRecordingDetail' && <RealtimeRecordingDetailPage />}
+        {page === 'knowledgeDetail' && <KnowledgeDetailPage />}
+      </AntApp>
     </ConfigProvider>
   )
 }

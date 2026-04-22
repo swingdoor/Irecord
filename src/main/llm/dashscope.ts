@@ -57,7 +57,8 @@ export async function callLLM(
   settings: LLMSettings,
   systemPrompt: string,
   userPrompt: string,
-  maxRetries: number = 3
+  maxRetries: number = 3,
+  parseJson: boolean = true
 ): Promise<string> {
   const apiKey = settings.llmApiKey
   if (!apiKey) {
@@ -72,8 +73,10 @@ export async function callLLM(
     try {
       const raw = await callOnce(apiKey, model, systemPrompt, userPrompt)
 
-      // 验证 JSON 可解析
-      tryParseJSON(raw)
+      if (parseJson) {
+        // 验证 JSON 可解析
+        tryParseJSON(raw)
+      }
 
       // 解析成功，返回原始字符串（前端负责解析和渲染）
       return raw

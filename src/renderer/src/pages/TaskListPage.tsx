@@ -1,10 +1,12 @@
 import { useEffect, useCallback, useState } from 'react'
 import { Typography, Alert, Button, Segmented, Space, Modal, Tabs } from 'antd'
 import { BgColorsOutlined, SettingOutlined } from '@ant-design/icons'
-import { useAppStore, Task, RealtimeRecording } from '../stores/appStore'
+import { useAppStore, Task, RealtimeRecording, KnowledgeDoc } from '../stores/appStore'
 import { FeatureCards } from '../components/FeatureCards'
 import { TaskTable } from '../components/TaskTable'
 import { RealtimeRecordingTable } from '../components/RealtimeRecordingTable'
+import { KnowledgeTable } from '../components/KnowledgeTable'
+import { CreateDocModal } from '../components/CreateDocModal'
 import { SettingsModal } from '../components/SettingsModal'
 
 const { Title } = Typography
@@ -15,7 +17,13 @@ interface TaskListPageProps {
 }
 
 export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageProps) {
-  const { tasks, refreshTasks, realtimeRecordings, refreshRealtimeRecordings, setPage, setCurrentTaskId, setCurrentRealtimeRecordingId } = useAppStore()
+  const {
+    tasks, refreshTasks,
+    realtimeRecordings, refreshRealtimeRecordings,
+    knowledgeDocs, refreshKnowledgeDocs,
+    templates, refreshTemplates,
+    setPage, setCurrentTaskId, setCurrentRealtimeRecordingId, setCurrentKnowledgeDocId
+  } = useAppStore()
   const [processingStartTime, setProcessingStartTime] = useState(Date.now())
   const [selectedModel, setSelectedModel] = useState('qwen3-asr')
   const [availableModels, setAvailableModels] = useState<Array<{ id: string; name: string; available: boolean }>>([])
@@ -23,10 +31,13 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [streamingModelAvailable, setStreamingModelAvailable] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('realtime')
+  const [createDocModalOpen, setCreateDocModalOpen] = useState(false)
 
   useEffect(() => {
     refreshTasks()
     refreshRealtimeRecordings()
+    refreshKnowledgeDocs()
+    refreshTemplates()
     Promise.all([
       window.electronAPI.getAvailableModels(),
       window.electronAPI.getSettings(),
@@ -47,7 +58,19 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
       refreshTasks()
     })
     return () => { unsub() }
-  }, [refreshTasks, refreshRealtimeRecordings])
+  }, [refreshTasks, refreshRealtimeRecordings, refreshKnowledgeDocs, refreshTemplates])
+
+  // 轮询：当有 generating 状态的文档时，每 3 秒刷新
+  useEffect(() => {
+    const hasGenerating = knowledgeDocs.some(d => d.status === 'generating')
+    if (!hasGenerating) return
+
+    const timer = setInterval(() => {
+      refreshKnowledgeDocs()
+    }, 3000)
+
+    return () => clearInterval(timer)
+  }, [knowledgeDocs, refreshKnowledgeDocs])
 
   const handleSettingsChange = useCallback((settings: Record<string, any>) => {
     if (settings.defaultModel) setSelectedModel(settings.defaultModel)
@@ -166,6 +189,24 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     refreshRealtimeRecordings()
   }, [refreshRealtimeRecordings])
 
+  const handleViewKnowledgeDoc = useCallback((doc: KnowledgeDoc) => {
+    setCurrentKnowledgeDocId(doc.id)
+    setPage('knowledgeDetail')
+  }, [setCurrentKnowledgeDocId, setPage])
+
+  const handleDeleteKnowledgeDoc = useCallback(async (docId: string) => {
+    await window.electronAPI.deleteKnowledgeDoc(docId)
+    refreshKnowledgeDocs()
+  }, [refreshKnowledgeDocs])
+
+  const handleDocCreated = useCallback(async (_docId: string) => {
+    setCreateDocModalOpen(false)
+    refreshKnowledgeDocs()
+    setActiveTab('knowledge')
+    const settings = await window.electronAPI.getSettings()
+    await window.electronAPI.saveSettings({ ...settings, activeTab: 'knowledge' })
+  }, [refreshKnowledgeDocs])
+
   return (
     <div
       style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, minHeight: '100vh' }}
@@ -191,7 +232,12 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
         <Alert type="error" message={addErrors.join('；')} closable onClose={() => setAddErrors([])} />
       )}
 
-      <FeatureCards onUpload={handleAddFiles} onRecord={handleRecord} streamingModelAvailable={streamingModelAvailable} />
+      <FeatureCards
+        onUpload={handleAddFiles}
+        onRecord={handleRecord}
+        onCreateDoc={() => setCreateDocModalOpen(true)}
+        streamingModelAvailable={streamingModelAvailable}
+      />
 
       <Tabs activeKey={activeTab} onChange={handleTabChange}>
         <Tabs.TabPane tab="实时录音" key="realtime">
@@ -215,7 +261,24 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
             onDeepAnalysis={handleDeepAnalysisFromList}
           />
         </Tabs.TabPane>
+        <Tabs.TabPane tab="知识整理" key="knowledge">
+          <KnowledgeTable
+            docs={knowledgeDocs}
+            templates={templates}
+            themeMode={themeMode}
+            onView={handleViewKnowledgeDoc}
+            onDelete={handleDeleteKnowledgeDoc}
+            onRefresh={refreshKnowledgeDocs}
+            onCreateNew={() => setCreateDocModalOpen(true)}
+          />
+        </Tabs.TabPane>
       </Tabs>
+
+      <CreateDocModal
+        open={createDocModalOpen}
+        onClose={() => setCreateDocModalOpen(false)}
+        onCreated={handleDocCreated}
+      />
 
       <SettingsModal
         open={settingsOpen}
