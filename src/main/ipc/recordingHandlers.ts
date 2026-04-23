@@ -7,7 +7,7 @@ import { RealtimeRecognizer, checkStreamingModelExists, getStreamingModelPath } 
 import { Qwen3RealtimeRecognizer } from '../engine/qwen3-realtime-recognizer'
 import { getQwen3AsrModelPath, getVadModelPath, checkQwen3AsrModelExists, checkVadModelExists } from '../utils/paths'
 import { getRealtimeEngineConfig, getSettings } from '../utils/settings'
-import { createRealtimeRecording, getRealtimeRecording, deleteRealtimeRecording } from '../db/database'
+import { createRealtimeRecording, getAllRealtimeRecordings, getRealtimeRecording, deleteRealtimeRecording } from '../db/database'
 import { createTask } from '../db/database'
 import { startQueue } from '../taskQueue'
 import { logError } from '../utils/errorHandler'
