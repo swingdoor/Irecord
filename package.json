@@ -1,6 +1,6 @@
 {
   "name": "irecord",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "你说我记 - 本地语音识别转写工具",
   "main": "dist/main/index.js",
   "scripts": {
