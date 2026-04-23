@@ -68,8 +68,6 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ fi
   useEffect(() => {
     if (!containerRef.current || !filePath) return
 
-    console.log('[AudioPlayer] 初始化播放器:', { filePath })
-
     let destroyed = false
 
     const init = async () => {
@@ -77,7 +75,6 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ fi
         setLoading(true)
         setError(null)
 
-        // 获取音频文件为 Blob
         const res = await window.electronAPI.getAudioBlob(filePath)
         if (destroyed) return
 
@@ -93,23 +90,17 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ fi
           return
         }
 
-        // 创建 Blob 和 Blob URL
         const blob = new Blob([res.buffer], { type: res.mimeType })
         const blobUrl = URL.createObjectURL(blob)
         blobUrlRef.current = blobUrl
 
-        console.log('[AudioPlayer] Blob URL 创建成功:', blobUrl)
-
-        // 尝试解码峰值数据
         let peaks: Float32Array | null = null
         try {
           const base64Res = await window.electronAPI.readFileBuffer(filePath)
           if (base64Res.base64 && !destroyed) {
             peaks = await decodePeaks(base64Res.base64, 500)
           }
-        } catch (err) {
-          console.warn('[AudioPlayer] 读取音频峰值失败:', err)
-        }
+        } catch { /* ignore */ }
 
         if (destroyed) {
           URL.revokeObjectURL(blobUrl)
@@ -120,8 +111,6 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ fi
         media.src = blobUrl
         media.preload = 'auto'
         mediaRef.current = media
-
-        console.log('[AudioPlayer] 创建 audio 元素')
 
         const ws = WaveSurfer.create({
           container: containerRef.current!,
@@ -138,7 +127,6 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ fi
 
         ws.on('ready', () => {
           if (!destroyed) {
-            console.log('[AudioPlayer] 播放器就绪')
             setDuration(ws.getDuration())
             setError(null)
             setLoading(false)
@@ -149,16 +137,13 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ fi
         ws.on('pause', () => { if (!destroyed) setPlaying(false) })
         ws.on('finish', () => { if (!destroyed) setPlaying(false) })
         ws.on('error', (err) => {
-          console.error('[AudioPlayer] 播放错误:', err)
           if (!destroyed) {
             setError(`播放错误: ${err?.message || '未知错误'}`)
             setLoading(false)
           }
         })
 
-        // 监听 audio 元素的错误
-        media.addEventListener('error', (e) => {
-          console.error('[AudioPlayer] audio 元素错误:', e, media.error)
+        media.addEventListener('error', () => {
           if (!destroyed && media.error) {
             const errorMessages: Record<number, string> = {
               1: '音频加载被中止',
@@ -174,7 +159,6 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ fi
         ws.setVolume(volume / 100)
         wsRef.current = ws
       } catch (err: any) {
-        console.error('[AudioPlayer] 初始化失败:', err)
         if (!destroyed) {
           setError(`初始化失败: ${err.message || '未知错误'}`)
           setLoading(false)

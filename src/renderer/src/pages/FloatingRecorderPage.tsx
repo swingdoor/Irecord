@@ -99,12 +99,8 @@ export default function FloatingRecorderPage() {
 
   const startRecording = useCallback(async () => {
     // 防止重复启动（React StrictMode 会 mount 两次）
-    if (hasStartedRef.current) {
-      console.log('[FloatingRecorderPage] startRecording 已经启动过，跳过')
-      return
-    }
+    if (hasStartedRef.current) return
     hasStartedRef.current = true
-    console.log('[FloatingRecorderPage] startRecording 开始')
 
     try {
       const settings = await window.electronAPI.getSettings()

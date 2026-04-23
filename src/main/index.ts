@@ -74,7 +74,6 @@ app.whenReady().then(async () => {
       }
 
       if (!existsSync(filePath)) {
-        console.error('[local-file] 文件不存在:', filePath)
         return new Response('Not Found', { status: 404 })
       }
 
@@ -118,7 +117,6 @@ app.whenReady().then(async () => {
         },
       })
     } catch (err: any) {
-      console.error('[local-file] 协议处理错误:', err)
       return new Response(err.message || 'Internal Error', { status: 500 })
     }
   })
@@ -131,8 +129,8 @@ app.whenReady().then(async () => {
   // 清理无引用的孤儿文件
   try {
     cleanupOrphanFiles()
-  } catch (err) {
-    console.warn('[startup] 孤儿文件清理失败:', err)
+  } catch {
+    // 清理失败不影响启动
   }
 
   // 启动时自动处理残留的 pending 任务

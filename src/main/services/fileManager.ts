@@ -259,9 +259,8 @@ export function cleanupOrphanFiles(): { deletedCount: number; freedSpace: number
         unlinkSync(orphan.filePath)
         freedSpace += orphan.fileSize || 0
         deletedCount++
-        console.log('[FileManager] 删除孤儿文件:', orphan.filePath)
-      } catch (err) {
-        console.error('[FileManager] 删除文件失败:', orphan.filePath, err)
+      } catch {
+        // 删除失败，跳过
       }
     } else {
       deletedCount++
@@ -273,7 +272,6 @@ export function cleanupOrphanFiles(): { deletedCount: number; freedSpace: number
 
   if (deletedCount > 0) {
     _saveDb()
-    console.log(`[FileManager] 清理完成: 删除 ${deletedCount} 个文件, 释放 ${(freedSpace / 1024 / 1024).toFixed(1)} MB`)
   }
 
   return { deletedCount, freedSpace }
@@ -329,8 +327,8 @@ export function migrateExistingData(): void {
       })
       _db.run('UPDATE realtime_recordings SET fileId = ? WHERE id = ?', [fileId, rec.id])
       migratedRecordings++
-    } catch (err) {
-      console.warn('[FileManager] 迁移录音失败:', rec.id, err)
+    } catch {
+      // 迁移失败，跳过
     }
   }
 
@@ -345,13 +343,12 @@ export function migrateExistingData(): void {
       })
       _db.run('UPDATE tasks SET fileId = ? WHERE id = ?', [fileId, task.id])
       migratedTasks++
-    } catch (err) {
-      console.warn('[FileManager] 迁移任务失败:', task.id, err)
+    } catch {
+      // 迁移失败，跳过
     }
   }
 
   if (migratedRecordings > 0 || migratedTasks > 0) {
     _saveDb()
-    console.log(`[FileManager] 数据迁移完成: 录音 ${migratedRecordings} 条, 任务 ${migratedTasks} 条`)
   }
 }

@@ -1,18 +1,18 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import { existsSync, statSync } from 'fs'
-import { copyFile, writeFile } from 'fs/promises'
+import { copyFile } from 'fs/promises'
 import { join } from 'path'
 import { IRealtimeRecognizer } from '../engine/IRealtimeRecognizer'
 import { RealtimeRecognizer, checkStreamingModelExists, getStreamingModelPath } from '../engine/realtime-recognizer'
 import { Qwen3RealtimeRecognizer } from '../engine/qwen3-realtime-recognizer'
 import { getQwen3AsrModelPath, getVadModelPath, checkQwen3AsrModelExists, checkVadModelExists } from '../utils/paths'
 import { getRealtimeEngineConfig, getSettings } from '../utils/settings'
-import { createRealtimeRecording, getAllRealtimeRecordings, getRealtimeRecording, deleteRealtimeRecording } from '../db/database'
-import { createTask, getAllTasks } from '../db/database'
+import { createRealtimeRecording, getRealtimeRecording, deleteRealtimeRecording } from '../db/database'
+import { createTask } from '../db/database'
 import { startQueue } from '../taskQueue'
 import { logError } from '../utils/errorHandler'
 import { canStartRecording, setRecordingState, getRecordingState, closeFloatingRecorder } from '../windows/floatingRecorder'
-import { registerFile, addReference, removeReference, getFile } from '../services/fileManager'
+import { registerFile, addReference, removeReference } from '../services/fileManager'
 
 function getMainWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
@@ -320,15 +320,6 @@ export function registerRecordingHandlers(): void {
     createProofreadingTask: boolean
   }) => {
     try {
-      console.log('[save-realtime-recording] 开始保存:', {
-        title: params.title,
-        filePath: params.filePath,
-        duration: params.duration,
-        wordCount: params.wordCount,
-        segmentsCount: params.segments.length,
-        createProofreadingTask: params.createProofreadingTask
-      })
-
       const actualFileSize = existsSync(params.filePath) ? statSync(params.filePath).size : 0
 
       const recording = await createRealtimeRecording({
@@ -387,7 +378,6 @@ export function registerRecordingHandlers(): void {
   ipcMain.handle('start-floating-recording', async () => {
     try {
       const currentState = getRecordingState()
-      console.log('[start-floating-recording] 当前状态:', currentState)
 
       // 如果已经在浮动录音中，直接返回成功（防止重复调用）
       if (currentState === 'floating') {
