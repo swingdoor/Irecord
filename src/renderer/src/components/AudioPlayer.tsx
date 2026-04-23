@@ -19,9 +19,7 @@ export interface AudioPlayerHandle {
 }
 
 interface AudioPlayerProps {
-  /** local-file:// URL for playback */
-  url: string
-  /** original file path for reading buffer to decode peaks */
+  /** 原始文件路径 */
   filePath: string
   onTimeUpdate?: (time: number) => void
 }
@@ -54,7 +52,7 @@ async function decodePeaks(base64: string, samples: number): Promise<Float32Arra
 }
 
 
-export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ url, filePath, onTimeUpdate }, ref) => {
+export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ filePath, onTimeUpdate }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WaveSurfer | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -62,76 +60,146 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ ur
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(80)
   const [speed, setSpeed] = useState(1.0)
-  const [convertedUrl, setConvertedUrl] = useState<string | null>(null)
-  const [converting, setConverting] = useState(false)
-
-  const actualUrl = convertedUrl || url
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const blobUrlRef = useRef<string | null>(null)
+  const mediaRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
-    if (!containerRef.current || !actualUrl) return
+    if (!containerRef.current || !filePath) return
+
+    console.log('[AudioPlayer] 初始化播放器:', { filePath })
 
     let destroyed = false
 
     const init = async () => {
-      // Try to read file and decode real peaks
-      let peaks: Float32Array | null = null
       try {
-        const res = await window.electronAPI.readFileBuffer(filePath)
-        if (res.base64 && !destroyed) {
-          peaks = await decodePeaks(res.base64, 500)
+        setLoading(true)
+        setError(null)
+
+        // 获取音频文件为 Blob
+        const res = await window.electronAPI.getAudioBlob(filePath)
+        if (destroyed) return
+
+        if (res.error) {
+          setError(`加载失败: ${res.error}`)
+          setLoading(false)
+          return
         }
-      } catch { /* ignore */ }
 
-      if (destroyed) return
+        if (!res.buffer || !res.mimeType) {
+          setError('音频数据无效')
+          setLoading(false)
+          return
+        }
 
-      const media = document.createElement('audio')
-      media.src = actualUrl
-      media.preload = 'auto'
+        // 创建 Blob 和 Blob URL
+        const blob = new Blob([res.buffer], { type: res.mimeType })
+        const blobUrl = URL.createObjectURL(blob)
+        blobUrlRef.current = blobUrl
 
-      const ws = WaveSurfer.create({
-        container: containerRef.current!,
-        waveColor: '#d1d5db',
-        progressColor: '#1677ff',
-        cursorColor: '#1677ff',
-        height: 48,
-        barWidth: 2,
-        barGap: 1,
-        barRadius: 2,
-        media,
-        ...(peaks ? { peaks: [peaks] } : {}),
-      })
+        console.log('[AudioPlayer] Blob URL 创建成功:', blobUrl)
 
-      ws.on('ready', () => { if (!destroyed) setDuration(ws.getDuration()) })
-      ws.on('timeupdate', (t) => { if (!destroyed) { setCurrentTime(t); onTimeUpdate?.(t) } })
-      ws.on('play', () => { if (!destroyed) setPlaying(true) })
-      ws.on('pause', () => { if (!destroyed) setPlaying(false) })
-      ws.on('finish', () => { if (!destroyed) setPlaying(false) })
-      ws.on('error', async () => {
-        // 原始文件播放失败，尝试转换为 WAV
-        if (!destroyed && !convertedUrl && !converting) {
-          setConverting(true)
-          ws.destroy()
-          wsRef.current = null
-          const res = await window.electronAPI.convertForPlayback(filePath)
-          if (!destroyed && res.url) {
-            setConvertedUrl(res.url)
+        // 尝试解码峰值数据
+        let peaks: Float32Array | null = null
+        try {
+          const base64Res = await window.electronAPI.readFileBuffer(filePath)
+          if (base64Res.base64 && !destroyed) {
+            peaks = await decodePeaks(base64Res.base64, 500)
           }
-          setConverting(false)
+        } catch (err) {
+          console.warn('[AudioPlayer] 读取音频峰值失败:', err)
         }
-      })
 
-      ws.setVolume(volume / 100)
-      wsRef.current = ws
+        if (destroyed) {
+          URL.revokeObjectURL(blobUrl)
+          return
+        }
+
+        const media = document.createElement('audio')
+        media.src = blobUrl
+        media.preload = 'auto'
+        mediaRef.current = media
+
+        console.log('[AudioPlayer] 创建 audio 元素')
+
+        const ws = WaveSurfer.create({
+          container: containerRef.current!,
+          waveColor: '#d1d5db',
+          progressColor: '#1677ff',
+          cursorColor: '#1677ff',
+          height: 48,
+          barWidth: 2,
+          barGap: 1,
+          barRadius: 2,
+          media,
+          ...(peaks ? { peaks: [peaks] } : {}),
+        })
+
+        ws.on('ready', () => {
+          if (!destroyed) {
+            console.log('[AudioPlayer] 播放器就绪')
+            setDuration(ws.getDuration())
+            setError(null)
+            setLoading(false)
+          }
+        })
+        ws.on('timeupdate', (t) => { if (!destroyed) { setCurrentTime(t); onTimeUpdate?.(t) } })
+        ws.on('play', () => { if (!destroyed) setPlaying(true) })
+        ws.on('pause', () => { if (!destroyed) setPlaying(false) })
+        ws.on('finish', () => { if (!destroyed) setPlaying(false) })
+        ws.on('error', (err) => {
+          console.error('[AudioPlayer] 播放错误:', err)
+          if (!destroyed) {
+            setError(`播放错误: ${err?.message || '未知错误'}`)
+            setLoading(false)
+          }
+        })
+
+        // 监听 audio 元素的错误
+        media.addEventListener('error', (e) => {
+          console.error('[AudioPlayer] audio 元素错误:', e, media.error)
+          if (!destroyed && media.error) {
+            const errorMessages: Record<number, string> = {
+              1: '音频加载被中止',
+              2: '网络错误导致音频加载失败',
+              3: '音频解码失败，可能是格式不支持',
+              4: '音频文件不存在或无法访问'
+            }
+            setError(errorMessages[media.error.code] || `音频加载失败 (错误代码: ${media.error.code})`)
+            setLoading(false)
+          }
+        })
+
+        ws.setVolume(volume / 100)
+        wsRef.current = ws
+      } catch (err: any) {
+        console.error('[AudioPlayer] 初始化失败:', err)
+        if (!destroyed) {
+          setError(`初始化失败: ${err.message || '未知错误'}`)
+          setLoading(false)
+        }
+      }
     }
 
     init()
 
     return () => {
       destroyed = true
+      // 停止播放并清理 audio 元素
+      if (mediaRef.current) {
+        mediaRef.current.pause()
+        mediaRef.current.src = ''
+        mediaRef.current = null
+      }
       wsRef.current?.destroy()
       wsRef.current = null
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = null
+      }
     }
-  }, [actualUrl, filePath])
+  }, [filePath])
 
   useEffect(() => { wsRef.current?.setVolume(volume / 100) }, [volume])
   useEffect(() => { wsRef.current?.setPlaybackRate(speed) }, [speed])
@@ -151,12 +219,38 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(({ ur
 
   return (
     <div style={{ padding: '16px 0' }}>
-      {converting && (
-        <div style={{ textAlign: 'center', padding: '20px 0', color: '#999' }}>
-          正在转换音频格式以支持播放...
-        </div>
-      )}
-      <div ref={containerRef} style={{ marginBottom: 12, minHeight: 48 }} />
+      <div ref={containerRef} style={{ marginBottom: 12, minHeight: 48, position: 'relative' }}>
+        {loading && !error && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#999',
+            fontSize: 13,
+            backgroundColor: '#fafafa',
+            borderRadius: 6
+          }}>
+            加载中...
+          </div>
+        )}
+        {error && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#999',
+            fontSize: 13,
+            backgroundColor: '#fafafa',
+            borderRadius: 6
+          }}>
+            {error}
+          </div>
+        )}
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Button
           type="text"

@@ -176,7 +176,9 @@ async function processNext(win: BrowserWindow) {
 }
 
 function notifyTaskChanged(win: BrowserWindow, taskId: string) {
-  win.webContents.send('task-status-changed', { taskId, startTime: taskStartTime })
+  if (!win.isDestroyed()) {
+    win.webContents.send('task-status-changed', { taskId, startTime: taskStartTime })
+  }
 }
 
 export async function cancelCurrentTask(win: BrowserWindow) {

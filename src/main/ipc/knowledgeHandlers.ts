@@ -1,4 +1,5 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { existsSync } from 'fs'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { getSettings } from '../utils/settings'
@@ -20,6 +21,20 @@ import {
   getRealtimeRecording,
 } from '../db/database'
 import { logError } from '../utils/errorHandler'
+
+function getUniqueFileName(dir: string, baseName: string, ext: string): string {
+  // 清理文件名中的非法字符
+  const cleanName = baseName.replace(/[<>:"/\\|?*]/g, '_')
+  let fileName = `${cleanName}.${ext}`
+  let counter = 1
+
+  while (existsSync(join(dir, fileName))) {
+    fileName = `${cleanName}(${counter}).${ext}`
+    counter++
+  }
+
+  return fileName
+}
 
 export function registerKnowledgeHandlers(): void {
   // 创建知识文档（异步生成）
@@ -282,6 +297,79 @@ export function registerKnowledgeHandlers(): void {
     } catch (err: any) {
       logError('export-knowledge-pdf', err)
       return { error: `导出失败: ${err.message}` }
+    }
+  })
+
+  // 批量导出知识文档
+  ipcMain.handle('batch-export-knowledge', async (_event, params: {
+    docIds: string[]
+    format: 'md' | 'txt' | 'pdf'
+  }) => {
+    try {
+      const result = await dialog.showOpenDialog({
+        title: '选择导出文件夹',
+        properties: ['openDirectory']
+      })
+
+      if (result.canceled || !result.filePaths[0]) return { canceled: true }
+
+      const targetDir = result.filePaths[0]
+      let success = 0
+      let failed = 0
+      const errors: Array<{ id: string; name: string; error: string }> = []
+
+      for (const docId of params.docIds) {
+        try {
+          const doc = await getKnowledgeDoc(docId)
+
+          // 只导出 completed 状态的文档
+          if (doc?.status !== 'completed') {
+            errors.push({ id: docId, name: doc?.title || docId, error: '文档未完成' })
+            failed++
+            continue
+          }
+
+          const fileName = getUniqueFileName(targetDir, doc.title, params.format)
+          const filePath = join(targetDir, fileName)
+
+          // 根据格式导出
+          if (params.format === 'pdf') {
+            const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } })
+            const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+              body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; padding: 40px; line-height: 1.8; color: #333; }
+              h1 { font-size: 24px; margin: 24px 0 12px; } h2 { font-size: 20px; margin: 20px 0 10px; }
+              h3 { font-size: 18px; margin: 16px 0 8px; } h4 { font-size: 16px; margin: 14px 0 6px; }
+              h5 { font-size: 15px; margin: 12px 0 6px; } h6 { font-size: 14px; margin: 10px 0 4px; }
+              p { margin-bottom: 10px; } ul, ol { margin-left: 20px; margin-bottom: 10px; }
+              li { margin-bottom: 4px; } a { color: #1677ff; }
+              blockquote { border-left: 3px solid #d9d9d9; padding-left: 12px; color: #666; margin: 10px 0; }
+              code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+              pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; }
+              hr { border: none; border-top: 1px solid #e8e8e8; margin: 16px 0; }
+            </style></head><body>${doc.content}</body></html>`
+            await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+            const pdfData = await win.webContents.printToPDF({ printBackground: true })
+            await writeFile(filePath, pdfData)
+            win.close()
+          } else if (params.format === 'md') {
+            const md = htmlToMarkdown(doc.content)
+            await writeFile(filePath, md, 'utf-8')
+          } else {
+            const plainText = htmlToPlainText(doc.content)
+            await writeFile(filePath, plainText, 'utf-8')
+          }
+
+          success++
+        } catch (err: any) {
+          errors.push({ id: docId, name: '未知', error: err.message })
+          failed++
+        }
+      }
+
+      return { success, failed, errors, targetDir }
+    } catch (err: any) {
+      logError('batch-export-knowledge', err)
+      return { error: err.message || '批量导出失败' }
     }
   })
 }

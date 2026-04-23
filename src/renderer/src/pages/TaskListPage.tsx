@@ -22,7 +22,8 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     realtimeRecordings, refreshRealtimeRecordings,
     knowledgeDocs, refreshKnowledgeDocs,
     templates, refreshTemplates,
-    setPage, setCurrentTaskId, setCurrentRealtimeRecordingId, setCurrentKnowledgeDocId
+    setPage, setCurrentTaskId, setCurrentRealtimeRecordingId, setCurrentKnowledgeDocId,
+    activeTab, setActiveTab
   } = useAppStore()
   const [processingStartTime, setProcessingStartTime] = useState(Date.now())
   const [selectedModel, setSelectedModel] = useState('qwen3-asr')
@@ -30,7 +31,6 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
   const [addErrors, setAddErrors] = useState<string[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [streamingModelAvailable, setStreamingModelAvailable] = useState(false)
-  const [activeTab, setActiveTab] = useState<string>('realtime')
   const [createDocModalOpen, setCreateDocModalOpen] = useState(false)
 
   useEffect(() => {

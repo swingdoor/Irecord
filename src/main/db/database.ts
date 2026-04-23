@@ -4,6 +4,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { randomUUID } from 'crypto'
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js'
 
+import { initFileManager, migrateExistingData } from '../services/fileManager'
+
 let db: SqlJsDatabase | null = null
 let dbPath: string = ''
 
@@ -11,6 +13,7 @@ export interface Task {
   id: string
   fileName: string
   filePath: string
+  fileId: string | null
   fileSize: number
   duration: number
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'stopped' | 'pending_analysis' | 'recording'
@@ -37,9 +40,11 @@ export interface RealtimeRecording {
   id: string
   title: string
   filePath: string
+  fileId: string | null
   fileSize: number
   duration: number
   wordCount: number
+  modelType: string | null
   createdAt: string
   text: string
   segments: string
@@ -141,6 +146,9 @@ async function getDb(): Promise<SqlJsDatabase> {
     )
   `)
 
+  // 迁移：为 realtime_recordings 添加 modelType 列
+  try { db.run(`ALTER TABLE realtime_recordings ADD COLUMN modelType TEXT`) } catch { /* already exists */ }
+
   // 创建 knowledge_docs 表
   db.run(`
     CREATE TABLE IF NOT EXISTS knowledge_docs (
@@ -174,6 +182,12 @@ async function getDb(): Promise<SqlJsDatabase> {
 
   // 初始化预设模板
   await initBuiltinTemplates(db)
+
+  // 初始化 FileManager
+  initFileManager(db, saveDb)
+
+  // 迁移现有数据到文件管理系统
+  migrateExistingData()
 
   return db
 }
@@ -260,14 +274,6 @@ export async function updateTask(id: string, updates: Partial<Pick<Task, 'status
 
 export async function deleteTask(id: string) {
   const d = await getDb()
-  // Clean up recording WAV file if in recordings directory
-  const task = await getTask(id)
-  if (task?.filePath) {
-    const recordingsDir = join(app.getPath('userData'), 'recordings')
-    if (task.filePath.startsWith(recordingsDir) && existsSync(task.filePath)) {
-      try { const { unlinkSync } = require('fs'); unlinkSync(task.filePath) } catch { /* ignore */ }
-    }
-  }
   d.run('DELETE FROM results WHERE taskId = ?', [id])
   d.run('DELETE FROM tasks WHERE id = ?', [id])
   saveDb()
@@ -322,6 +328,7 @@ export async function createRealtimeRecording(recording: {
   wordCount: number
   text: string
   segments: any[]
+  modelType?: string
 }): Promise<RealtimeRecording> {
   const d = await getDb()
   const rec: RealtimeRecording = {
@@ -331,14 +338,15 @@ export async function createRealtimeRecording(recording: {
     fileSize: recording.fileSize,
     duration: recording.duration,
     wordCount: recording.wordCount,
+    modelType: recording.modelType || null,
     createdAt: new Date().toISOString(),
     text: recording.text,
     segments: JSON.stringify(recording.segments),
   }
 
   d.run(
-    'INSERT INTO realtime_recordings (id, title, filePath, fileSize, duration, wordCount, createdAt, text, segments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [rec.id, rec.title, rec.filePath, rec.fileSize, rec.duration, rec.wordCount, rec.createdAt, rec.text, rec.segments]
+    'INSERT INTO realtime_recordings (id, title, filePath, fileSize, duration, wordCount, modelType, createdAt, text, segments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [rec.id, rec.title, rec.filePath, rec.fileSize, rec.duration, rec.wordCount, rec.modelType, rec.createdAt, rec.text, rec.segments]
   )
   saveDb()
   return rec

@@ -1,12 +1,14 @@
-import { app, BrowserWindow, Menu, protocol } from 'electron'
+import { app, BrowserWindow, Menu, protocol, globalShortcut, dialog, net } from 'electron'
 import { join } from 'path'
-import { existsSync, statSync, readFileSync } from 'fs'
+import { existsSync, statSync, readFileSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
 import { cleanupOldTempFiles, cleanupTempFiles } from './audio/temp'
 import { registerIpcHandlers } from './ipc/index'
 import { closeDb, resetStaleTasks } from './db/database'
 import { shutdownQueue, startQueue } from './taskQueue'
 import { getResourcePath } from './utils/paths'
+import { registerRecordingShortcut, unregisterRecordingShortcut } from './shortcuts/globalShortcuts'
+import { cleanupOrphanFiles } from './services/fileManager'
 
 Menu.setApplicationMenu(null)
 
@@ -19,6 +21,10 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 let mainWindow: BrowserWindow | null = null
+
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow
+}
 
 function createWindow(): void {
   const iconPath = app.isPackaged
@@ -59,52 +65,62 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   // 处理 local-file:// 协议请求（支持 Range 以实现音频 seek）
   protocol.handle('local-file', (request) => {
-    const parsed = new URL(request.url)
-    const filePath = decodeURIComponent(parsed.pathname).replace(/^\//, '')
-
-    if (!existsSync(filePath)) {
-      return new Response('Not Found', { status: 404 })
-    }
-
-    const buffer = readFileSync(filePath)
-    const total = buffer.length
-
-    // 根据扩展名推断 MIME
-    const ext = filePath.split('.').pop()?.toLowerCase() || ''
-    const mimeMap: Record<string, string> = {
-      wav: 'audio/wav', mp3: 'audio/mpeg', flac: 'audio/flac',
-      aac: 'audio/aac', m4a: 'audio/mp4', ogg: 'audio/ogg',
-      mp4: 'video/mp4', mkv: 'video/x-matroska', avi: 'video/x-msvideo', mov: 'video/quicktime',
-    }
-    const contentType = mimeMap[ext] || 'application/octet-stream'
-
-    const rangeHeader = request.headers.get('Range')
-    if (rangeHeader) {
-      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/)
-      if (match) {
-        const start = parseInt(match[1], 10)
-        const end = match[2] ? parseInt(match[2], 10) : total - 1
-        const chunk = buffer.slice(start, end + 1)
-        return new Response(chunk, {
-          status: 206,
-          headers: {
-            'Content-Type': contentType,
-            'Content-Range': `bytes ${start}-${end}/${total}`,
-            'Content-Length': String(chunk.length),
-            'Accept-Ranges': 'bytes',
-          },
-        })
+    try {
+      const parsed = new URL(request.url)
+      let filePath = decodeURIComponent(parsed.pathname)
+      // Windows: /C:/Users/... -> C:/Users/...
+      if (process.platform === 'win32' && /^\/[a-zA-Z]:/.test(filePath)) {
+        filePath = filePath.substring(1)
       }
-    }
 
-    return new Response(buffer, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Content-Length': String(total),
-        'Accept-Ranges': 'bytes',
-      },
-    })
+      if (!existsSync(filePath)) {
+        console.error('[local-file] 文件不存在:', filePath)
+        return new Response('Not Found', { status: 404 })
+      }
+
+      const stat = statSync(filePath)
+      const total = stat.size
+
+      const ext = filePath.split('.').pop()?.toLowerCase() || ''
+      const mimeMap: Record<string, string> = {
+        wav: 'audio/wav', mp3: 'audio/mpeg', flac: 'audio/flac',
+        aac: 'audio/aac', m4a: 'audio/mp4', ogg: 'audio/ogg',
+        mp4: 'video/mp4', mkv: 'video/x-matroska', avi: 'video/x-msvideo', mov: 'video/quicktime',
+      }
+      const contentType = mimeMap[ext] || 'application/octet-stream'
+
+      const rangeHeader = request.headers.get('Range')
+      if (rangeHeader) {
+        const match = rangeHeader.match(/bytes=(\d+)-(\d*)/)
+        if (match) {
+          const start = parseInt(match[1], 10)
+          const end = match[2] ? parseInt(match[2], 10) : total - 1
+          const chunk = readFileSync(filePath).slice(start, end + 1)
+          return new Response(chunk, {
+            status: 206,
+            headers: {
+              'Content-Type': contentType,
+              'Content-Range': `bytes ${start}-${end}/${total}`,
+              'Content-Length': String(chunk.length),
+              'Accept-Ranges': 'bytes',
+            },
+          })
+        }
+      }
+
+      const buffer = readFileSync(filePath)
+      return new Response(buffer, {
+        status: 200,
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': String(total),
+          'Accept-Ranges': 'bytes',
+        },
+      })
+    } catch (err: any) {
+      console.error('[local-file] 协议处理错误:', err)
+      return new Response(err.message || 'Internal Error', { status: 500 })
+    }
   })
 
   cleanupOldTempFiles()
@@ -112,8 +128,28 @@ app.whenReady().then(async () => {
   registerIpcHandlers()
   createWindow()
 
+  // 清理无引用的孤儿文件
+  try {
+    cleanupOrphanFiles()
+  } catch (err) {
+    console.warn('[startup] 孤儿文件清理失败:', err)
+  }
+
   // 启动时自动处理残留的 pending 任务
   if (mainWindow) startQueue(mainWindow)
+
+  // 注册全局快捷键
+  if (mainWindow) {
+    const shortcutResult = registerRecordingShortcut(mainWindow)
+    if (!shortcutResult.success) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: '快捷键注册失败',
+        message: shortcutResult.error || '全局快捷键注册失败',
+        buttons: ['知道了']
+      })
+    }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -126,6 +162,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('will-quit', () => {
+  unregisterRecordingShortcut()
 })
 
 app.on('before-quit', async () => {

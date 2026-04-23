@@ -25,6 +25,7 @@ export interface RealtimeRecording {
   fileSize: number
   duration: number
   wordCount: number
+  modelType: string | null
   createdAt: string
   text: string
   segments: string

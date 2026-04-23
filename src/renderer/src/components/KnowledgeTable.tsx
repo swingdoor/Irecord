@@ -32,6 +32,8 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
 
   const filtered = search
     ? docs.filter(d => d.title.toLowerCase().includes(search.toLowerCase()))
@@ -133,6 +135,66 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
     })
   }, [modal, onDelete])
 
+  const handleBatchDelete = useCallback(() => {
+    if (selectedRowKeys.length === 0) return
+
+    modal.confirm({
+      title: `确定删除选中的 ${selectedRowKeys.length} 个文档？`,
+      content: '删除后无法恢复',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setLoading(true)
+        for (const id of selectedRowKeys) {
+          await window.electronAPI.deleteKnowledgeDoc(id)
+        }
+        setLoading(false)
+        setSelectedRowKeys([])
+        message.success(`已删除 ${selectedRowKeys.length} 个文档`)
+        onRefresh()
+      }
+    })
+  }, [selectedRowKeys, modal, message, onRefresh])
+
+  const handleBatchExport = useCallback(async (format: 'md' | 'txt' | 'pdf') => {
+    if (selectedRowKeys.length === 0) return
+
+    const selectedDocs = docs.filter(d => selectedRowKeys.includes(d.id))
+    const exportableDocs = selectedDocs.filter(d => d.status === 'completed')
+
+    if (exportableDocs.length === 0) {
+      message.warning('选中的文档中没有已完成的文档')
+      return
+    }
+
+    if (exportableDocs.length < selectedDocs.length) {
+      message.info(`将导出 ${exportableDocs.length} 个文件（跳过 ${selectedDocs.length - exportableDocs.length} 个未完成的文档）`)
+    }
+
+    setLoading(true)
+    const result = await window.electronAPI.batchExportKnowledge({
+      docIds: exportableDocs.map(d => d.id),
+      format
+    })
+    setLoading(false)
+
+    if (result.error) {
+      message.error(result.error)
+      return
+    }
+
+    if (result.canceled) return
+
+    if (result.failed === 0) {
+      message.success(`已导出 ${result.success} 个文件到 ${result.targetDir}`)
+    } else {
+      message.warning(`已导出 ${result.success} 个文件，${result.failed} 个失败`)
+    }
+
+    setSelectedRowKeys([])
+  }, [selectedRowKeys, docs, message])
+
   const getMenuItems = (doc: KnowledgeDoc): MenuProps['items'] => [
     { key: 'md', icon: <DownloadOutlined />, label: '导出 Markdown', disabled: doc.status !== 'completed' },
     { key: 'txt', icon: <DownloadOutlined />, label: '导出 TXT', disabled: doc.status !== 'completed' },
@@ -225,9 +287,32 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
             ]}
           />
         </Space>
-        <Button icon={<SettingOutlined />} onClick={() => setTemplateModalOpen(true)}>
-          管理模板
-        </Button>
+        <Space>
+          {selectedRowKeys.length > 0 && (
+            <>
+              <Button danger onClick={handleBatchDelete}>
+                删除选中 ({selectedRowKeys.length})
+              </Button>
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'md', label: '导出为 Markdown' },
+                    { key: 'txt', label: '导出为 TXT' },
+                    { key: 'pdf', label: '导出为 PDF' },
+                  ],
+                  onClick: ({ key }) => handleBatchExport(key as 'md' | 'txt' | 'pdf')
+                }}
+              >
+                <Button>
+                  批量导出 <DownloadOutlined />
+                </Button>
+              </Dropdown>
+            </>
+          )}
+          <Button icon={<SettingOutlined />} onClick={() => setTemplateModalOpen(true)}>
+            管理模板
+          </Button>
+        </Space>
       </div>
 
       {filtered.length === 0 ? (
@@ -237,8 +322,13 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
           dataSource={filtered}
           columns={columns}
           rowKey="id"
+          loading={loading}
           size="small"
           pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as string[])
+          }}
           onRow={(doc) => ({
             onClick: () => doc.status === 'completed' && onView(doc),
             style: { cursor: doc.status === 'completed' ? 'pointer' : 'default' },

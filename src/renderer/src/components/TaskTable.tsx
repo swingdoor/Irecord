@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Table, Input, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Segmented, Modal } from 'antd'
+import { Table, Input, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Segmented, Modal, message } from 'antd'
 import {
   SearchOutlined, EllipsisOutlined, LoadingOutlined, PlayCircleOutlined,
   CloseOutlined, DownloadOutlined, DeleteOutlined,
@@ -114,6 +114,8 @@ interface TaskTableProps {
 export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail, onDelete, onRestart, onCancel, onExportAudio, onDeepAnalysis }: TaskTableProps) {
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
 
   const handleExport = useCallback(async (taskId: string) => {
     const data = await window.electronAPI.getTaskResult(taskId)
@@ -126,6 +128,78 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
       keywords: r.keywords ? JSON.parse(r.keywords) : undefined,
     })
   }, [])
+
+  const handleBatchDelete = useCallback(() => {
+    if (selectedRowKeys.length === 0) return
+
+    const selectedTasks = tasks.filter(t => selectedRowKeys.includes(t.id))
+    const processingTasks = selectedTasks.filter(t => t.status === 'processing')
+
+    const title = processingTasks.length > 0
+      ? `将取消 ${processingTasks.length} 个正在处理的任务，并删除所有 ${selectedRowKeys.length} 个任务`
+      : `确定删除选中的 ${selectedRowKeys.length} 个任务？`
+
+    Modal.confirm({
+      title,
+      content: '删除后无法恢复',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setLoading(true)
+
+        // 先取消 processing 任务
+        for (const task of processingTasks) {
+          await window.electronAPI.cancelTask(task.id)
+        }
+
+        // 再批量删除
+        for (const id of selectedRowKeys) {
+          await window.electronAPI.deleteTask(id)
+        }
+
+        setLoading(false)
+        setSelectedRowKeys([])
+        message.success(`已删除 ${selectedRowKeys.length} 个任务`)
+        window.location.reload()
+      }
+    })
+  }, [selectedRowKeys, tasks])
+
+  const handleBatchExportTxt = useCallback(async () => {
+    if (selectedRowKeys.length === 0) return
+
+    const selectedTasks = tasks.filter(t => selectedRowKeys.includes(t.id))
+    const exportableTasks = selectedTasks.filter(t => t.status === 'completed')
+
+    if (exportableTasks.length === 0) {
+      message.warning('选中的任务中没有已完成的任务')
+      return
+    }
+
+    if (exportableTasks.length < selectedTasks.length) {
+      message.info(`将导出 ${exportableTasks.length} 个文件（跳过 ${selectedTasks.length - exportableTasks.length} 个未完成的任务）`)
+    }
+
+    setLoading(true)
+    const result = await window.electronAPI.batchExportTaskTxt(exportableTasks.map(t => t.id))
+    setLoading(false)
+
+    if (result.error) {
+      message.error(result.error)
+      return
+    }
+
+    if (result.canceled) return
+
+    if (result.failed === 0) {
+      message.success(`已导出 ${result.success} 个文件到 ${result.targetDir}`)
+    } else {
+      message.warning(`已导出 ${result.success} 个文件，${result.failed} 个失败`)
+    }
+
+    setSelectedRowKeys([])
+  }, [selectedRowKeys, tasks])
 
   const filtered = search
     ? tasks.filter(t => t.fileName.toLowerCase().includes(search.toLowerCase()))
@@ -232,7 +306,7 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space>
           <Input
             placeholder="搜索文件..."
@@ -251,6 +325,16 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
             ]}
           />
         </Space>
+        {selectedRowKeys.length > 0 && (
+          <Space>
+            <Button danger onClick={handleBatchDelete}>
+              删除选中 ({selectedRowKeys.length})
+            </Button>
+            <Button onClick={handleBatchExportTxt}>
+              批量导出 TXT
+            </Button>
+          </Space>
+        )}
       </div>
 
       {filtered.length === 0 ? (
@@ -260,9 +344,14 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
           dataSource={filtered}
           columns={columns}
           rowKey="id"
+          loading={loading}
           size="small"
           pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
           locale={{ emptyText: search ? '没有匹配的文件' : '暂无任务，上传音视频文件开始' }}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as string[])
+          }}
           onRow={(task) => ({
             onClick: () => (task.status === 'completed' || task.status === 'pending_analysis') && onViewDetail(task),
             style: (task.status === 'completed' || task.status === 'pending_analysis') ? { cursor: 'pointer' } : undefined,

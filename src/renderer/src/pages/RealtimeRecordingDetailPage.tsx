@@ -22,7 +22,6 @@ function formatDuration(seconds: number): string {
 export default function RealtimeRecordingDetailPage() {
   const { currentRealtimeRecordingId, setPage, currentRealtimeRecording, setCurrentRealtimeRecording, refreshTasks, setActiveTab } = useAppStore()
   const [loading, setLoading] = useState(true)
-  const [audioUrl, setAudioUrl] = useState('')
   const [currentTime, setCurrentTime] = useState(0)
   const playerRef = useRef<AudioPlayerHandle>(null)
 
@@ -33,12 +32,6 @@ export default function RealtimeRecordingDetailPage() {
       const result = await window.electronAPI.getRealtimeRecording(currentRealtimeRecordingId)
       if (result.error || !result.recording) { setPage('taskList'); return }
       setCurrentRealtimeRecording(result.recording)
-
-      // Load audio URL
-      if (result.recording.filePath) {
-        const res = await window.electronAPI.getFileUrl(result.recording.filePath)
-        if (res.url) setAudioUrl(res.url)
-      }
       setLoading(false)
     }
     load()
@@ -46,8 +39,9 @@ export default function RealtimeRecordingDetailPage() {
 
   const handleBack = useCallback(() => {
     setCurrentRealtimeRecording(null)
+    setActiveTab('realtime')
     setPage('taskList')
-  }, [setPage, setCurrentRealtimeRecording])
+  }, [setPage, setCurrentRealtimeRecording, setActiveTab])
 
   const handleCopy = useCallback(async () => {
     if (!currentRealtimeRecording) return
@@ -120,7 +114,7 @@ export default function RealtimeRecordingDetailPage() {
         {/* Left: Audio + Transcript */}
         <Col span={14} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Card size="small" style={{ marginBottom: 12 }}>
-            <AudioPlayer ref={playerRef} url={audioUrl} filePath={currentRealtimeRecording.filePath} onTimeUpdate={setCurrentTime} />
+            <AudioPlayer ref={playerRef} filePath={currentRealtimeRecording.filePath} onTimeUpdate={setCurrentTime} />
           </Card>
           <Card size="small" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} styles={{ body: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' } }}>
             <TranscriptPanel

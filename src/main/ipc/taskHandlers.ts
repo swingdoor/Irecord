@@ -1,14 +1,38 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
-import { statSync } from 'fs'
+import { statSync, existsSync } from 'fs'
+import { writeFile } from 'fs/promises'
+import { join } from 'path'
 import { getAudioInfo } from '../audio/ffmpeg'
 import { validateFile, getFileFilters } from '../audio/validate'
 import { createTask, getAllTasks, getTask, getResult, deleteTask, updateTask } from '../db/database'
 import { startQueue, cancelCurrentTask, getCurrentTaskId, getTaskStartTime } from '../taskQueue'
 import { logError } from '../utils/errorHandler'
+import { registerFile, removeReference } from '../services/fileManager'
 
 function getMainWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
   return wins.length > 0 ? wins[0] : null
+}
+
+function formatTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+function getUniqueFileName(dir: string, baseName: string, ext: string): string {
+  // 清理文件名中的非法字符
+  const cleanName = baseName.replace(/[<>:"/\\|?*]/g, '_')
+  let fileName = `${cleanName}.${ext}`
+  let counter = 1
+
+  while (existsSync(join(dir, fileName))) {
+    fileName = `${cleanName}(${counter}).${ext}`
+    counter++
+  }
+
+  return fileName
 }
 
 async function addFilesCommon(filePaths: string[], modelType?: string) {
@@ -31,6 +55,14 @@ async function addFilesCommon(filePaths: string[], modelType?: string) {
         duration: info.duration,
         modelType,
       })
+
+      // 注册文件到 FileManager
+      registerFile({
+        filePath,
+        ownerId: task.id,
+        ownerType: 'task'
+      })
+
       tasks.push(JSON.parse(JSON.stringify(task)))
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '未知错误'
@@ -109,6 +141,10 @@ export function registerTaskHandlers(): void {
         const win = getMainWindow()
         if (win) await cancelCurrentTask(win)
       }
+
+      // 移除文件引用
+      removeReference({ ownerId: taskId, ownerType: 'task' })
+
       await deleteTask(taskId)
       return { success: true }
     } catch (err) {
@@ -173,6 +209,60 @@ export function registerTaskHandlers(): void {
     } catch (err) {
       logError('start-deep-analysis', err)
       return { error: '启动分析失败' }
+    }
+  })
+
+  // 批量导出任务 TXT
+  ipcMain.handle('batch-export-task-txt', async (_event, taskIds: string[]) => {
+    try {
+      const result = await dialog.showOpenDialog({
+        title: '选择导出文件夹',
+        properties: ['openDirectory']
+      })
+
+      if (result.canceled || !result.filePaths[0]) return { canceled: true }
+
+      const targetDir = result.filePaths[0]
+      let success = 0
+      let failed = 0
+      const errors: Array<{ id: string; name: string; error: string }> = []
+
+      for (const taskId of taskIds) {
+        try {
+          const task = await getTask(taskId)
+          const taskResult = await getResult(taskId)
+
+          // 只导出 completed 状态的任务
+          if (task?.status !== 'completed' || !taskResult) {
+            errors.push({ id: taskId, name: task?.fileName || taskId, error: '任务未完成' })
+            failed++
+            continue
+          }
+
+          // 生成内容
+          let content = ''
+          if (taskResult.segments) {
+            const segments = JSON.parse(taskResult.segments)
+            content = segments.map((s: any) => `${formatTimestamp(s.start)} - ${s.text}`).join('\n')
+          } else {
+            content = taskResult.text
+          }
+
+          // 导出
+          const baseName = task.fileName.replace(/\.[^.]+$/, '')
+          const fileName = getUniqueFileName(targetDir, baseName, 'txt')
+          await writeFile(join(targetDir, fileName), content, 'utf-8')
+          success++
+        } catch (err: any) {
+          errors.push({ id: taskId, name: '未知', error: err.message })
+          failed++
+        }
+      }
+
+      return { success, failed, errors, targetDir }
+    } catch (err: any) {
+      logError('batch-export-task-txt', err)
+      return { error: err.message || '批量导出失败' }
     }
   })
 }

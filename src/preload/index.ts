@@ -10,6 +10,10 @@ const electronAPI = {
     ipcRenderer.invoke('get-available-models'),
   getFileUrl: (filePath: string): Promise<{ url?: string; error?: string }> =>
     ipcRenderer.invoke('get-file-url', filePath),
+  getAudioBlob: (
+    filePath: string
+  ): Promise<{ buffer?: ArrayBuffer; mimeType?: string; error?: string }> =>
+    ipcRenderer.invoke('get-audio-blob', filePath),
   readFileBuffer: (filePath: string): Promise<{ base64?: string; error?: string }> =>
     ipcRenderer.invoke('read-file-buffer', filePath),
   convertForPlayback: (filePath: string): Promise<{ url?: string; error?: string }> =>
@@ -140,6 +144,31 @@ const electronAPI = {
   }): Promise<{ recordingId?: string; taskId?: string; error?: string }> =>
     ipcRenderer.invoke('save-realtime-recording', params),
 
+  // ===== 浮动录音 =====
+  startFloatingRecording: (): Promise<{ success?: boolean; error?: string }> =>
+    ipcRenderer.invoke('start-floating-recording'),
+  stopFloatingRecording: (): Promise<{
+    text?: string
+    segments?: Array<{ text: string; startTime: number; endTime: number }>
+    filePath?: string
+    duration?: number
+    wordCount?: number
+    error?: string
+  }> => ipcRenderer.invoke('stop-floating-recording'),
+  onShortcutStopRecording: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('shortcut-stop-recording', handler)
+    return () => ipcRenderer.removeListener('shortcut-stop-recording', handler)
+  },
+  onRequestCloseConfirmation: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('request-close-confirmation', handler)
+    return () => ipcRenderer.removeListener('request-close-confirmation', handler)
+  },
+  closeFloatingRecorder: (): void => {
+    ipcRenderer.send('close-floating-recorder')
+  },
+
   // ===== 知识整理 =====
   createKnowledgeDoc: (params: {
     sourceIds: Array<{ type: 'task' | 'realtime'; id: string }>
@@ -187,6 +216,37 @@ const electronAPI = {
     ipcRenderer.invoke('export-knowledge-txt', params),
   exportKnowledgePdf: (params: { title: string; content: string }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('export-knowledge-pdf', params),
+
+  // ===== 批量操作 =====
+  batchExportRecordingWav: (recordingIds: string[]): Promise<{
+    success: number
+    failed: number
+    errors: Array<{ id: string; name: string; error: string }>
+    targetDir?: string
+    canceled?: boolean
+    error?: string
+  }> => ipcRenderer.invoke('batch-export-recording-wav', recordingIds),
+
+  batchExportTaskTxt: (taskIds: string[]): Promise<{
+    success: number
+    failed: number
+    errors: Array<{ id: string; name: string; error: string }>
+    targetDir?: string
+    canceled?: boolean
+    error?: string
+  }> => ipcRenderer.invoke('batch-export-task-txt', taskIds),
+
+  batchExportKnowledge: (params: {
+    docIds: string[]
+    format: 'md' | 'txt' | 'pdf'
+  }): Promise<{
+    success: number
+    failed: number
+    errors: Array<{ id: string; name: string; error: string }>
+    targetDir?: string
+    canceled?: boolean
+    error?: string
+  }> => ipcRenderer.invoke('batch-export-knowledge', params),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', electronAPI)

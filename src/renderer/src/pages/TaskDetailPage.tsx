@@ -28,9 +28,8 @@ function getModelLabel(modelType?: string): string {
 }
 
 export default function TaskDetailPage() {
-  const { currentTaskId, setPage, currentResult, setCurrentResult, currentTask, setCurrentTask } = useAppStore()
+  const { currentTaskId, setPage, currentResult, setCurrentResult, currentTask, setCurrentTask, setActiveTab } = useAppStore()
   const [loading, setLoading] = useState(true)
-  const [audioUrl, setAudioUrl] = useState('')
   const [currentTime, setCurrentTime] = useState(0)
   const playerRef = useRef<AudioPlayerHandle>(null)
 
@@ -42,11 +41,6 @@ export default function TaskDetailPage() {
       if (data.error) { setPage('taskList'); return }
       setCurrentTask(data.task)
       setCurrentResult(data.result)
-      // Load audio URL
-      if (data.task?.filePath) {
-        const res = await window.electronAPI.getFileUrl(data.task.filePath)
-        if (res.url) setAudioUrl(res.url)
-      }
       setLoading(false)
     }
     load()
@@ -55,8 +49,9 @@ export default function TaskDetailPage() {
   const handleBack = useCallback(() => {
     setCurrentResult(null)
     setCurrentTask(null)
+    setActiveTab('upload')
     setPage('taskList')
-  }, [setPage, setCurrentResult, setCurrentTask])
+  }, [setPage, setCurrentResult, setCurrentTask, setActiveTab])
 
   const handleCopy = useCallback(async () => {
     if (!currentResult) return
@@ -118,7 +113,7 @@ export default function TaskDetailPage() {
         {/* Left: Audio + Transcript */}
         <Col span={14} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <Card size="small" style={{ marginBottom: 12 }}>
-            <AudioPlayer ref={playerRef} url={audioUrl} filePath={currentTask.filePath} onTimeUpdate={setCurrentTime} />
+            <AudioPlayer ref={playerRef} filePath={currentTask.filePath} onTimeUpdate={setCurrentTime} />
           </Card>
           <Card size="small" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} styles={{ body: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' } }}>
             <TranscriptPanel

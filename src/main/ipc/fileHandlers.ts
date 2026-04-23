@@ -4,12 +4,49 @@ import { copyFile } from 'fs/promises'
 import { getAudioInfo, convertToWav } from '../audio/ffmpeg'
 import { logError } from '../utils/errorHandler'
 
+function toLocalFileUrl(filePath: string): string {
+  // 统一用正斜杠，确保 URL 解析正确
+  const normalized = filePath.replace(/\\/g, '/')
+  const urlPath = normalized.startsWith('/') ? normalized : `/${normalized}`
+  return `local-file://${urlPath}`
+}
+
 export function registerFileHandlers(): void {
-  // 获取文件 URL（用于播放）
+  // 获取音频文件为 ArrayBuffer（用于 Blob URL 播放）
+  ipcMain.handle('get-audio-blob', async (_event, filePath: string) => {
+    try {
+      if (!existsSync(filePath)) return { error: '文件不存在' }
+
+      const { readFile } = await import('fs/promises')
+      const buffer = await readFile(filePath)
+
+      // 根据扩展名推断 MIME 类型
+      const ext = filePath.split('.').pop()?.toLowerCase() || ''
+      const mimeMap: Record<string, string> = {
+        wav: 'audio/wav',
+        mp3: 'audio/mpeg',
+        flac: 'audio/flac',
+        aac: 'audio/aac',
+        m4a: 'audio/mp4',
+        ogg: 'audio/ogg',
+      }
+      const mimeType = mimeMap[ext] || 'audio/wav'
+
+      return {
+        buffer: buffer.buffer,
+        mimeType
+      }
+    } catch (err: any) {
+      logError('get-audio-blob', err)
+      return { error: err.message }
+    }
+  })
+
+  // 获取文件 URL（用于播放）- 保留用于向后兼容
   ipcMain.handle('get-file-url', async (_event, filePath: string) => {
     try {
       if (!existsSync(filePath)) return { error: '文件不存在' }
-      return { url: `local-file://${filePath}` }
+      return { url: toLocalFileUrl(filePath) }
     } catch (err: any) {
       logError('get-file-url', err)
       return { error: err.message }
@@ -35,11 +72,11 @@ export function registerFileHandlers(): void {
 
       const ext = filePath.split('.').pop()?.toLowerCase()
       if (ext === 'wav' || ext === 'mp3' || ext === 'ogg') {
-        return { url: `local-file://${filePath}` }
+        return { url: toLocalFileUrl(filePath) }
       }
 
       const tmpPath = await convertToWav(filePath)
-      return { url: `local-file://${tmpPath}` }
+      return { url: toLocalFileUrl(tmpPath) }
     } catch (err: any) {
       logError('convert-for-playback', err)
       return { error: err.message }
