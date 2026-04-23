@@ -40,6 +40,12 @@ function createWindow(): void {
     title: '',
     icon: iconPath,
     show: false,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#ffffff',
+      symbolColor: '#333333',
+      height: 30
+    },
     backgroundColor: '#ffffff',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

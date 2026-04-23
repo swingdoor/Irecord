@@ -111,6 +111,12 @@ function App() {
   return (
     <ConfigProvider theme={themeConfig}>
       <AntApp>
+        <div style={{
+          height: 30,
+          WebkitAppRegion: 'drag',
+          backgroundColor: '#ffffff',
+          flexShrink: 0
+        } as any} />
         {page === 'taskList' && <TaskListPage themeMode={themeMode} onThemeChange={setThemeMode} />}
         {page === 'taskDetail' && <TaskDetailPage />}
         {page === 'recording' && <RecordingPage />}
