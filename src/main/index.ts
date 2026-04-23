@@ -40,6 +40,8 @@ function createWindow(): void {
     title: '',
     icon: iconPath,
     show: false,
+    titleBarStyle: 'hidden',
+    backgroundColor: '#ffffff',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
