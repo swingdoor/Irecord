@@ -1,14 +1,37 @@
 import { useState, useEffect } from 'react'
-import { Modal, Tabs, Form, Select, Input, InputNumber, Typography, Button, Space, message } from 'antd'
-import { FolderOpenOutlined } from '@ant-design/icons'
+import { Modal, Tabs, Form, Select, Input, InputNumber, Typography, Button, Space, Progress, Tag, message, Tooltip } from 'antd'
+import { DownloadOutlined, DeleteOutlined, CloseCircleOutlined, CheckCircleFilled, QuestionCircleOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
+
+// 带单位的 InputNumber 包装组件
+function InputNumberWithUnit({ value, onChange, unit, ...props }: any) {
+  return (
+    <div className="input-wrapper">
+      <InputNumber value={value} onChange={onChange} {...props} />
+      <span className="unit-text">{unit || ''}</span>
+    </div>
+  )
+}
 
 interface LLMProviderInfo {
   id: string
   name: string
   baseUrl: string
   models: Array<{ id: string; name: string }>
+}
+
+interface ModelRegistryEntry {
+  id: string
+  name: string
+  description: string
+  category: 'asr' | 'auxiliary'
+  size: number
+  bundled: boolean
+  downloadUrl?: string
+  status: 'installed' | 'not-installed' | 'downloading'
+  location?: string
+  deletable: boolean
 }
 
 interface SettingsModalProps {
@@ -25,6 +48,58 @@ const strategyOptions = [
   { value: 'plain', label: '整体识别' },
 ]
 
+function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(0)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
+
+function ModelListItem({ model, progress, onDownload, onCancel, onDelete }: {
+  model: ModelRegistryEntry
+  progress?: { percent: number; downloadedBytes: number; totalBytes: number }
+  onDownload: (id: string) => void
+  onCancel: (id: string) => void
+  onDelete: (id: string) => void
+}) {
+  const isDownloading = model.status === 'downloading' || progress
+  const isInstalled = model.status === 'installed' && !isDownloading
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '10px 12px', borderBottom: '1px solid #f0f0f0',
+      opacity: model.status === 'not-installed' && !isDownloading ? 0.55 : 1,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Text strong>{model.name}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{model.description}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{formatSize(model.size)}</Text>
+          {isInstalled && <Tag color="green" style={{ margin: 0, fontSize: 11, lineHeight: '18px', padding: '0 6px' }}><CheckCircleFilled /> 已安装</Tag>}
+        </div>
+        {isDownloading && progress && (
+          <div style={{ marginTop: 4 }}>
+            <Progress
+              percent={progress.percent}
+              size="small"
+              format={(p) => `${formatSize(progress.downloadedBytes)} / ${formatSize(progress.totalBytes)}`}
+            />
+          </div>
+        )}
+      </div>
+      <div style={{ marginLeft: 12, flexShrink: 0 }}>
+        {isDownloading ? (
+          <Button size="small" icon={<CloseCircleOutlined />} onClick={() => onCancel(model.id)}>取消</Button>
+        ) : isInstalled && model.deletable ? (
+          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDelete(model.id)}>删除</Button>
+        ) : model.status === 'not-installed' && model.downloadUrl ? (
+          <Button size="small" type="primary" icon={<DownloadOutlined />} onClick={() => onDownload(model.id)}>下载</Button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export function SettingsModal({ open, onClose, availableModels, onSettingsChange }: SettingsModalProps) {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
@@ -33,9 +108,35 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
   const [selectedProvider, setSelectedProvider] = useState('dashscope')
   const [providerModels, setProviderModels] = useState<Array<{ id: string; name: string }>>([])
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
+  const [modelRegistry, setModelRegistry] = useState<ModelRegistryEntry[]>([])
+  const [realtimeModels, setRealtimeModels] = useState<ModelRegistryEntry[]>([])
+  const [offlineModels, setOfflineModels] = useState<ModelRegistryEntry[]>([])
+  const [auxiliaryModels, setAuxiliaryModels] = useState<ModelRegistryEntry[]>([])
+  const [engines, setEngines] = useState<Array<{ id: string; name: string; type: string; description: string; models: string[]; available: boolean }>>([])
+  const [downloadPath, setDownloadPath] = useState('')
+  const [ffmpegExists, setFfmpegExists] = useState(true)
+  const [defaultModelPath, setDefaultModelPath] = useState('')
+  const [defaultFfmpegPath, setDefaultFfmpegPath] = useState('')
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, { percent: number; downloadedBytes: number; totalBytes: number }>>({})
+
+  const refreshModelRegistry = () => {
+    window.electronAPI.getModelRegistry().then(({ models, realtimeModels: rt, offlineModels: ol, auxiliaryModels: aux, downloadPath: dp, ffmpegExists: fe, defaultModelPath: dmp, defaultFfmpegPath: dfp }) => {
+      setModelRegistry(models)
+      setRealtimeModels(rt)
+      setOfflineModels(ol)
+      setAuxiliaryModels(aux)
+      setDownloadPath(dp)
+      setFfmpegExists(fe)
+      setDefaultModelPath(dmp)
+      setDefaultFfmpegPath(dfp)
+    })
+    window.electronAPI.getEngineRegistry().then(setEngines)
+  }
 
   useEffect(() => {
     if (open) {
+      refreshModelRegistry()
+
       Promise.all([
         window.electronAPI.getSettings(),
         window.electronAPI.getLlmProviders(),
@@ -47,7 +148,6 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
         const providerInfo = providers.find((p: LLMProviderInfo) => p.id === provider)
         setProviderModels(providerInfo?.models || [])
 
-        // 加载 API Keys（兼容旧字段）
         const keys: Record<string, string> = { ...(settings.llmApiKeys || {}) }
         if (!keys.dashscope && settings.llmApiKey) {
           keys.dashscope = settings.llmApiKey
@@ -55,16 +155,13 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
         setApiKeys(keys)
 
         const asrParams = settings.asrParams || {}
-        const realtimeParams = settings.realtimeParams || {}
         const engineConfig = settings.realtimeEngineConfig || {}
-        const zipformerParams = engineConfig.zipformerParams || realtimeParams
+        const zipformerParams = engineConfig.zipformerParams || settings.realtimeParams || {}
         const qwen3Params = engineConfig.qwen3Params || {}
 
         form.setFieldsValue({
           defaultModel: settings.defaultModel || availableModels.find(m => m.available)?.id || 'qwen3-asr',
           defaultStrategy: settings.defaultStrategy || 'auto',
-          modelDir: settings.modelDir || '',
-          ffmpegDir: settings.ffmpegDir || '',
           llmProvider: provider,
           llmModel: settings.llmModel || (providerInfo?.models[0]?.id || ''),
           llmApiKey: keys[provider] || '',
@@ -87,28 +184,85 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
         })
         setRealtimeEngine(engineConfig.engine || 'qwen3-simulated-streaming')
       })
+    } else {
+      setDownloadProgress({})
     }
   }, [open, form, availableModels])
 
-  const handleSelectFolder = async (field: string) => {
-    const result = await window.electronAPI.selectFolder()
-    if (!result.canceled && result.path) {
-      form.setFieldValue(field, result.path)
+  // Listen for download progress
+  useEffect(() => {
+    const unsubProgress = window.electronAPI.onModelDownloadProgress((data) => {
+      if (data.percent === -1) {
+        // -1 signals retrying, show as 0% with "retrying" indicator
+        setDownloadProgress(prev => ({ ...prev, [data.modelId]: { percent: 0, downloadedBytes: 0, totalBytes: data.totalBytes } }))
+      } else {
+        setDownloadProgress(prev => ({ ...prev, [data.modelId]: { percent: data.percent, downloadedBytes: data.downloadedBytes, totalBytes: data.totalBytes } }))
+      }
+    })
+    const unsubComplete = window.electronAPI.onModelDownloadComplete((data) => {
+      setDownloadProgress(prev => {
+        const next = { ...prev }
+        delete next[data.modelId]
+        return next
+      })
+      if (data.success) {
+        message.success('模型下载完成')
+      } else if (data.error) {
+        message.error(`下载失败: ${data.error}`)
+      }
+      refreshModelRegistry()
+    })
+    return () => { unsubProgress(); unsubComplete() }
+  }, [])
+
+  const handleDownload = async (modelId: string) => {
+    const result = await window.electronAPI.downloadModel(modelId)
+    if (!result.success && result.error) {
+      // Only show error for pre-download validation failures (disk space, already installed, etc.)
+      // Network errors during download are handled by onModelDownloadComplete
+      message.error(result.error)
     }
   }
 
+  const handleCancel = async (modelId: string) => {
+    await window.electronAPI.cancelModelDownload(modelId)
+    setDownloadProgress(prev => {
+      const next = { ...prev }
+      delete next[modelId]
+      return next
+    })
+    refreshModelRegistry()
+  }
+
+  const handleDelete = (modelId: string) => {
+    const model = modelRegistry.find(m => m.id === modelId)
+    Modal.confirm({
+      title: '删除模型',
+      content: `确定要删除 ${model?.name || modelId} 吗？删除后需要重新下载。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const result = await window.electronAPI.deleteModel(modelId)
+        if (result.success) {
+          message.success('模型已删除')
+          refreshModelRegistry()
+        } else {
+          message.error(result.error || '删除失败')
+        }
+      },
+    })
+  }
+
   const handleProviderChange = (providerId: string) => {
-    // 保存当前 provider 的 key
     const currentKey = form.getFieldValue('llmApiKey') || ''
     setApiKeys(prev => ({ ...prev, [selectedProvider]: currentKey }))
 
-    // 切换 provider
     setSelectedProvider(providerId)
     const providerInfo = llmProviders.find(p => p.id === providerId)
     const models = providerInfo?.models || []
     setProviderModels(models)
 
-    // 更新表单
     form.setFieldsValue({
       llmProvider: providerId,
       llmModel: models[0]?.id || '',
@@ -118,19 +272,13 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
 
   const handleOk = async () => {
     const values = form.getFieldsValue()
-
-    // 先读取现有设置，再合并（避免覆盖未渲染 Tab 的配置）
     const currentSettings = await window.electronAPI.getSettings()
-
-    // 合并当前表单中的 key 到 apiKeys
     const finalApiKeys = { ...apiKeys, [selectedProvider]: values.llmApiKey || '' }
 
     const settings = {
       ...currentSettings,
       defaultModel: values.defaultModel,
       defaultStrategy: values.defaultStrategy,
-      modelDir: values.modelDir,
-      ffmpegDir: values.ffmpegDir,
       llmProvider: values.llmProvider,
       llmModel: values.llmModel,
       llmApiKey: finalApiKeys.dashscope || '',
@@ -172,7 +320,25 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
     }
   }
 
-  const available = availableModels.filter(m => m.available)
+  // Realtime engine options from engine registry
+  const realtimeEngineOptions = engines
+    .filter(e => e.type === 'realtime')
+    .map(e => ({
+      value: e.id,
+      label: e.available ? e.name : `${e.name}（未下载）`,
+      disabled: !e.available,
+    }))
+
+  // Offline model options from engine registry
+  const offlineModelOptions = engines
+    .filter(e => e.type === 'offline')
+    .map(e => {
+      return {
+        value: e.id === 'sensevoice-offline' ? 'sensevoice-small' : 'qwen3-asr',
+        label: e.available ? e.name : `${e.name}（未下载）`,
+        disabled: !e.available,
+      }
+    })
 
   return (
     <Modal
@@ -190,107 +356,193 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
       <Tabs
         items={[
           {
-            key: 'basic',
-            label: '基础设置',
+            key: 'models',
+            label: '模型管理',
             children: (
-              <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-                <style>{`
-                  .ant-form-item { margin-bottom: 16px; }
-                `}</style>
-                <Form.Item label="模型文件夹">
-                  <Space.Compact style={{ width: '100%' }}>
-                    <Form.Item name="modelDir" noStyle>
-                      <Input placeholder="请选择模型文件夹路径（必填）" />
-                    </Form.Item>
-                    <Button icon={<FolderOpenOutlined />} onClick={() => handleSelectFolder('modelDir')} />
-                  </Space.Compact>
-                </Form.Item>
-                <Form.Item label="FFmpeg 文件夹">
-                  <Space.Compact style={{ width: '100%' }}>
-                    <Form.Item name="ffmpegDir" noStyle>
-                      <Input placeholder="请选择 FFmpeg 所在文件夹路径（必填）" />
-                    </Form.Item>
-                    <Button icon={<FolderOpenOutlined />} onClick={() => handleSelectFolder('ffmpegDir')} />
-                  </Space.Compact>
-                </Form.Item>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  安装包不包含模型和 FFmpeg，请手动下载后在此配置路径。
+              <div style={{ marginTop: 8 }}>
+                <Text strong style={{ fontSize: 13 }}>实时转写模型</Text>
+                <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, marginTop: 8, marginBottom: 16 }}>
+                  {realtimeModels.map(m => (
+                    <ModelListItem
+                      key={`rt-${m.id}`}
+                      model={m}
+                      progress={downloadProgress[m.id]}
+                      onDownload={handleDownload}
+                      onCancel={handleCancel}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+                <Text strong style={{ fontSize: 13 }}>文件转写模型</Text>
+                <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, marginTop: 8, marginBottom: 16 }}>
+                  {offlineModels.map(m => (
+                    <ModelListItem
+                      key={`ol-${m.id}`}
+                      model={m}
+                      progress={downloadProgress[m.id]}
+                      onDownload={handleDownload}
+                      onCancel={handleCancel}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+                <Text strong style={{ fontSize: 13 }}>辅助模型</Text>
+                <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, marginTop: 8, marginBottom: 12 }}>
+                  {auxiliaryModels.map(m => (
+                    <ModelListItem
+                      key={`aux-${m.id}`}
+                      model={m}
+                      progress={downloadProgress[m.id]}
+                      onDownload={handleDownload}
+                      onCancel={handleCancel}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {downloadPath && `手动下载的模型请放置到：${downloadPath}`}
                 </Text>
-              </Form>
+              </div>
             ),
           },
           {
             key: 'realtime',
             label: '实时录音',
             children: (
-              <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+              <Form form={form} layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 17 }} style={{ marginTop: 16 }}>
                 <style>{`
-                  .ant-form-item { margin-bottom: 16px; }
+                  .ant-form-item { margin-bottom: 12px; }
+                  .input-wrapper {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                  }
+                  .input-wrapper .ant-select,
+                  .input-wrapper .ant-input-number {
+                    flex: 1;
+                  }
+                  .input-wrapper .unit-text {
+                    width: 32px;
+                    text-align: center;
+                    color: rgba(0, 0, 0, 0.65);
+                    font-size: 14px;
+                    flex-shrink: 0;
+                  }
+                  .label-with-tooltip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                  }
+                  .label-with-tooltip .anticon {
+                    color: #999;
+                    cursor: help;
+                    font-size: 14px;
+                  }
                 `}</style>
-                <Form.Item label="识别引擎" name="realtimeEngine">
+                <Form.Item label="识别模型" name="realtimeEngine">
                   <Select
-                    onChange={(v) => setRealtimeEngine(v)}
-                    options={[
-                      { value: 'qwen3-simulated-streaming', label: 'Qwen3-ASR + VAD（推荐，准确率高）' },
-                      { value: 'streaming-zipformer', label: 'Zipformer 流式（低延迟）' },
-                    ]}
+                    onChange={(v) => {
+                      const eng = engines.find(e => e.id === v)
+                      if (eng && !eng.available) {
+                        message.info('该模型未下载，请前往"模型管理"下载后使用')
+                        return
+                      }
+                      setRealtimeEngine(v)
+                    }}
+                    options={realtimeEngineOptions}
                   />
                 </Form.Item>
 
                 {realtimeEngine === 'qwen3-simulated-streaming' && (
                   <>
-                    <Form.Item
-                      label={<span>音频增益<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>放大麦克风音量（默认 2.0）</Text></span>}
-                      name="qwen3AudioGain"
-                    >
-                      <InputNumber min={1.0} max={10.0} step={0.5} style={{ width: '100%' }} />
+                    <Form.Item label="音频增益" name="qwen3AudioGain">
+                      <InputNumberWithUnit min={1.0} max={10.0} step={0.5} unit="倍" />
                     </Form.Item>
                     <Form.Item
-                      label={<span>VAD 检测阈值<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>语音活动检测灵敏度，值越低越敏感（默认 0.5）</Text></span>}
+                      label={
+                        <span className="label-with-tooltip">
+                          VAD 阈值
+                          <Tooltip title="语音活动检测灵敏度，值越低越敏感（默认 0.5）">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </span>
+                      }
                       name="qwen3VadThreshold"
                     >
-                      <InputNumber min={0.1} max={0.9} step={0.05} style={{ width: '100%' }} />
+                      <InputNumberWithUnit min={0.1} max={0.9} step={0.05} />
                     </Form.Item>
                     <Form.Item
-                      label={<span>最短静音时长（秒）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>多长静音后触发分段（默认 0.5）</Text></span>}
+                      label={
+                        <span className="label-with-tooltip">
+                          最短静音
+                          <Tooltip title="多长静音后触发分段（默认 0.5）">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </span>
+                      }
                       name="qwen3VadMinSilenceDuration"
                     >
-                      <InputNumber min={0.1} max={3.0} step={0.1} style={{ width: '100%' }} />
+                      <InputNumberWithUnit min={0.1} max={3.0} step={0.1} unit="秒" />
                     </Form.Item>
                     <Form.Item
-                      label={<span>最长语音时长（秒）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>超过此时长强制分段（默认 30）</Text></span>}
+                      label={
+                        <span className="label-with-tooltip">
+                          最长语音
+                          <Tooltip title="超过此时长强制分段（默认 30）">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </span>
+                      }
                       name="qwen3VadMaxSpeechDuration"
                     >
-                      <InputNumber min={5} max={120} step={5} style={{ width: '100%' }} />
+                      <InputNumberWithUnit min={5} max={120} step={5} unit="秒" />
                     </Form.Item>
                   </>
                 )}
 
                 {realtimeEngine === 'streaming-zipformer' && (
                   <>
-                    <Form.Item
-                      label={<span>音频增益<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>放大麦克风音量（默认 2.0）</Text></span>}
-                      name="zipformerAudioGain"
-                    >
-                      <InputNumber min={1.0} max={10.0} step={0.5} style={{ width: '100%' }} />
+                    <Form.Item label="音频增益" name="zipformerAudioGain">
+                      <InputNumberWithUnit min={1.0} max={10.0} step={0.5} unit="倍" />
                     </Form.Item>
                     <Form.Item
-                      label={<span>静音检测阈值1（秒）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>有标点时，多长静音后结束分段（默认 2.4）</Text></span>}
+                      label={
+                        <span className="label-with-tooltip">
+                          静音阈值1
+                          <Tooltip title="有标点时，多长静音后结束分段（默认 2.4）">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </span>
+                      }
                       name="rule1MinTrailingSilence"
                     >
-                      <InputNumber min={0.5} max={5.0} step={0.1} style={{ width: '100%' }} />
+                      <InputNumberWithUnit min={0.5} max={5.0} step={0.1} unit="秒" />
                     </Form.Item>
                     <Form.Item
-                      label={<span>静音检测阈值2（秒）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>无标点时，多长静音后结束分段（默认 1.2）</Text></span>}
+                      label={
+                        <span className="label-with-tooltip">
+                          静音阈值2
+                          <Tooltip title="无标点时，多长静音后结束分段（默认 1.2）">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </span>
+                      }
                       name="rule2MinTrailingSilence"
                     >
-                      <InputNumber min={0.3} max={3.0} step={0.1} style={{ width: '100%' }} />
+                      <InputNumberWithUnit min={0.3} max={3.0} step={0.1} unit="秒" />
                     </Form.Item>
                     <Form.Item
-                      label={<span>最长语音时长（秒）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>超过此时长强制分段（默认 20）</Text></span>}
+                      label={
+                        <span className="label-with-tooltip">
+                          最长语音
+                          <Tooltip title="超过此时长强制分段（默认 20）">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </span>
+                      }
                       name="rule3MinUtteranceLength"
                     >
-                      <InputNumber min={5} max={60} step={5} style={{ width: '100%' }} />
+                      <InputNumberWithUnit min={5} max={60} step={5} unit="秒" />
                     </Form.Item>
                   </>
                 )}
@@ -305,51 +557,127 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
             key: 'file-recognition',
             label: '文件识别',
             children: (
-              <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+              <Form form={form} layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 17 }} style={{ marginTop: 16 }}>
                 <style>{`
-                  .ant-form-item { margin-bottom: 16px; }
+                  .ant-form-item { margin-bottom: 12px; }
+                  .input-wrapper {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                  }
+                  .input-wrapper .ant-select,
+                  .input-wrapper .ant-input-number {
+                    flex: 1;
+                  }
+                  .input-wrapper .unit-text {
+                    width: 32px;
+                    text-align: center;
+                    color: rgba(0, 0, 0, 0.65);
+                    font-size: 14px;
+                    flex-shrink: 0;
+                  }
+                  .label-with-tooltip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                  }
+                  .label-with-tooltip .anticon {
+                    color: #999;
+                    cursor: help;
+                    font-size: 14px;
+                  }
                 `}</style>
                 <Form.Item label="默认模型" name="defaultModel">
-                  <Select options={available.map(m => ({ value: m.id, label: m.name }))} />
+                  <Select
+                    options={offlineModelOptions}
+                    onSelect={(value) => {
+                      const opt = offlineModelOptions.find(o => o.value === value)
+                      if (opt?.disabled) {
+                        message.info('该模型未下载，请前往"模型管理"下载后使用')
+                      }
+                    }}
+                  />
                 </Form.Item>
                 <Form.Item label="默认策略" name="defaultStrategy">
                   <Select options={strategyOptions} />
                 </Form.Item>
                 <Form.Item
-                  label={<span>说话人聚类阈值<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>值越高识别出的说话人越少（默认 0.85）</Text></span>}
+                  label={
+                    <span className="label-with-tooltip">
+                      聚类阈值
+                      <Tooltip title="值越高识别出的说话人越少（默认 0.85）">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </span>
+                  }
                   name="clusteringThreshold"
                 >
-                  <InputNumber min={0.1} max={1.0} step={0.05} style={{ width: '100%' }} />
+                  <InputNumberWithUnit min={0.1} max={1.0} step={0.05} />
                 </Form.Item>
                 <Form.Item
-                  label={<span>VAD 检测阈值<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>语音活动检测灵敏度，值越高越严格（默认 0.5）</Text></span>}
+                  label={
+                    <span className="label-with-tooltip">
+                      VAD 阈值
+                      <Tooltip title="语音活动检测灵敏度，值越高越严格（默认 0.5）">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </span>
+                  }
                   name="vadThreshold"
                 >
-                  <InputNumber min={0.1} max={1.0} step={0.05} style={{ width: '100%' }} />
+                  <InputNumberWithUnit min={0.1} max={1.0} step={0.05} />
                 </Form.Item>
                 <Form.Item
-                  label={<span>最短静音时长（秒）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>值越大分段越少（默认 1.5）</Text></span>}
+                  label={
+                    <span className="label-with-tooltip">
+                      最短静音
+                      <Tooltip title="值越大分段越少（默认 1.5）">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </span>
+                  }
                   name="minSilenceDuration"
                 >
-                  <InputNumber min={0.5} max={5.0} step={0.1} style={{ width: '100%' }} />
+                  <InputNumberWithUnit min={0.5} max={5.0} step={0.1} unit="秒" />
                 </Form.Item>
                 <Form.Item
-                  label={<span>最短语音时长（秒）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>过短的片段会被过滤（默认 1.0）</Text></span>}
+                  label={
+                    <span className="label-with-tooltip">
+                      最短语音
+                      <Tooltip title="过短的片段会被过滤（默认 1.0）">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </span>
+                  }
                   name="minSpeechDuration"
                 >
-                  <InputNumber min={0.5} max={5.0} step={0.1} style={{ width: '100%' }} />
+                  <InputNumberWithUnit min={0.5} max={5.0} step={0.1} unit="秒" />
                 </Form.Item>
                 <Form.Item
-                  label={<span>最长分段时长（秒）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>超长语音段会被强制切分（默认 30）</Text></span>}
+                  label={
+                    <span className="label-with-tooltip">
+                      最长分段
+                      <Tooltip title="超长语音段会被强制切分（默认 30）">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </span>
+                  }
                   name="maxSegmentDuration"
                 >
-                  <InputNumber min={10} max={120} step={5} style={{ width: '100%' }} />
+                  <InputNumberWithUnit min={10} max={120} step={5} unit="秒" />
                 </Form.Item>
                 <Form.Item
-                  label={<span>最大文件时长（秒）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>超出会被拒绝（默认 7200 = 2小时）</Text></span>}
+                  label={
+                    <span className="label-with-tooltip">
+                      最大时长
+                      <Tooltip title="超出会被拒绝（默认 7200 = 2小时）">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </span>
+                  }
                   name="maxDurationSeconds"
                 >
-                  <InputNumber min={600} max={14400} step={600} style={{ width: '100%' }} />
+                  <InputNumberWithUnit min={600} max={14400} step={600} unit="秒" />
                 </Form.Item>
               </Form>
             ),
@@ -358,9 +686,9 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
             key: 'llm',
             label: 'LLM 配置',
             children: (
-              <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+              <Form form={form} layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 17 }} style={{ marginTop: 16 }}>
                 <style>{`
-                  .ant-form-item { margin-bottom: 16px; }
+                  .ant-form-item { margin-bottom: 12px; }
                 `}</style>
                 <Form.Item label="模型厂商" name="llmProvider">
                   <Select
