@@ -3,6 +3,7 @@ import { join } from 'path'
 import { writeFileSync } from 'fs'
 import { getSettings, invalidateSettingsCache } from '../utils/settings'
 import { getAvailableModels, checkFfmpegExists, checkQwen3AsrModelExists, checkSenseVoiceModelExists } from '../utils/paths'
+import { getProviderList } from '../llm/providers'
 import { logError } from '../utils/errorHandler'
 
 export function registerSettingsHandlers(): void {
@@ -37,5 +38,10 @@ export function registerSettingsHandlers(): void {
       ffmpegExists: checkFfmpegExists(),
       hasAnyModel: checkQwen3AsrModelExists() || checkSenseVoiceModelExists(),
     }
+  })
+
+  // 获取 LLM 厂商列表
+  ipcMain.handle('get-llm-providers', () => {
+    return getProviderList()
   })
 }

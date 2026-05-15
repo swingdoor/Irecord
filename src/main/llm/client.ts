@@ -1,18 +1,33 @@
-const DASHSCOPE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+import { getProvider } from './providers'
 
 interface LLMSettings {
   llmProvider?: string
   llmModel?: string
   llmApiKey?: string
+  llmApiKeys?: Record<string, string>
+}
+
+function resolveApiKey(settings: LLMSettings): string {
+  const provider = settings.llmProvider || 'dashscope'
+  const keys = settings.llmApiKeys || {}
+
+  // 优先从 llmApiKeys[provider] 读取
+  if (keys[provider]) return keys[provider]
+
+  // fallback: 旧字段 llmApiKey 仅对 dashscope 生效
+  if (provider === 'dashscope' && settings.llmApiKey) return settings.llmApiKey
+
+  throw new Error('请先在设置中配置 API Key')
 }
 
 async function callOnce(
+  baseUrl: string,
   apiKey: string,
   model: string,
   systemPrompt: string,
   userPrompt: string
 ): Promise<string> {
-  const resp = await fetch(DASHSCOPE_URL, {
+  const resp = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -60,18 +75,20 @@ export async function callLLM(
   maxRetries: number = 3,
   parseJson: boolean = true
 ): Promise<string> {
-  const apiKey = settings.llmApiKey
-  if (!apiKey) {
-    throw new Error('请先在设置中配置 API Key')
+  const providerId = settings.llmProvider || 'dashscope'
+  const provider = getProvider(providerId)
+  if (!provider) {
+    throw new Error(`不支持的模型厂商: ${providerId}`)
   }
 
-  const model = settings.llmModel || 'qwen3-max'
+  const apiKey = resolveApiKey(settings)
+  const model = settings.llmModel || provider.models[0].id
 
   let lastError: Error | null = null
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const raw = await callOnce(apiKey, model, systemPrompt, userPrompt)
+      const raw = await callOnce(provider.baseUrl, apiKey, model, systemPrompt, userPrompt)
 
       if (parseJson) {
         // 验证 JSON 可解析

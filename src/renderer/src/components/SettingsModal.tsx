@@ -1,8 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Modal, Tabs, Form, Select, Input, InputNumber, Typography, AutoComplete, Button, Space, message } from 'antd'
+import { Modal, Tabs, Form, Select, Input, InputNumber, Typography, Button, Space, message } from 'antd'
 import { FolderOpenOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
+
+interface LLMProviderInfo {
+  id: string
+  name: string
+  baseUrl: string
+  models: Array<{ id: string; name: string }>
+}
 
 interface SettingsModalProps {
   open: boolean
@@ -18,20 +25,35 @@ const strategyOptions = [
   { value: 'plain', label: '整体识别' },
 ]
 
-const llmModelOptions = [
-  { value: 'qwen3-max', label: 'qwen3-max' },
-  { value: 'qwen3.6-plus', label: 'qwen3.6-plus' },
-  { value: 'qwen3.5-flash', label: 'qwen3.5-flash' },
-]
-
 export function SettingsModal({ open, onClose, availableModels, onSettingsChange }: SettingsModalProps) {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [realtimeEngine, setRealtimeEngine] = useState('qwen3-simulated-streaming')
+  const [llmProviders, setLlmProviders] = useState<LLMProviderInfo[]>([])
+  const [selectedProvider, setSelectedProvider] = useState('dashscope')
+  const [providerModels, setProviderModels] = useState<Array<{ id: string; name: string }>>([])
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (open) {
-      window.electronAPI.getSettings().then(settings => {
+      Promise.all([
+        window.electronAPI.getSettings(),
+        window.electronAPI.getLlmProviders(),
+      ]).then(([settings, providers]) => {
+        setLlmProviders(providers)
+
+        const provider = settings.llmProvider || 'dashscope'
+        setSelectedProvider(provider)
+        const providerInfo = providers.find((p: LLMProviderInfo) => p.id === provider)
+        setProviderModels(providerInfo?.models || [])
+
+        // 加载 API Keys（兼容旧字段）
+        const keys: Record<string, string> = { ...(settings.llmApiKeys || {}) }
+        if (!keys.dashscope && settings.llmApiKey) {
+          keys.dashscope = settings.llmApiKey
+        }
+        setApiKeys(keys)
+
         const asrParams = settings.asrParams || {}
         const realtimeParams = settings.realtimeParams || {}
         const engineConfig = settings.realtimeEngineConfig || {}
@@ -43,9 +65,9 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
           defaultStrategy: settings.defaultStrategy || 'auto',
           modelDir: settings.modelDir || '',
           ffmpegDir: settings.ffmpegDir || '',
-          llmProvider: settings.llmProvider || 'dashscope',
-          llmModel: settings.llmModel || 'qwen3-max',
-          llmApiKey: settings.llmApiKey || '',
+          llmProvider: provider,
+          llmModel: settings.llmModel || (providerInfo?.models[0]?.id || ''),
+          llmApiKey: keys[provider] || '',
           clusteringThreshold: asrParams.clusteringThreshold ?? 0.85,
           vadThreshold: asrParams.vadThreshold ?? 0.5,
           minSilenceDuration: asrParams.minSilenceDuration ?? 1.5,
@@ -75,11 +97,33 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
     }
   }
 
+  const handleProviderChange = (providerId: string) => {
+    // 保存当前 provider 的 key
+    const currentKey = form.getFieldValue('llmApiKey') || ''
+    setApiKeys(prev => ({ ...prev, [selectedProvider]: currentKey }))
+
+    // 切换 provider
+    setSelectedProvider(providerId)
+    const providerInfo = llmProviders.find(p => p.id === providerId)
+    const models = providerInfo?.models || []
+    setProviderModels(models)
+
+    // 更新表单
+    form.setFieldsValue({
+      llmProvider: providerId,
+      llmModel: models[0]?.id || '',
+      llmApiKey: apiKeys[providerId] || '',
+    })
+  }
+
   const handleOk = async () => {
     const values = form.getFieldsValue()
 
     // 先读取现有设置，再合并（避免覆盖未渲染 Tab 的配置）
     const currentSettings = await window.electronAPI.getSettings()
+
+    // 合并当前表单中的 key 到 apiKeys
+    const finalApiKeys = { ...apiKeys, [selectedProvider]: values.llmApiKey || '' }
 
     const settings = {
       ...currentSettings,
@@ -89,7 +133,8 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
       ffmpegDir: values.ffmpegDir,
       llmProvider: values.llmProvider,
       llmModel: values.llmModel,
-      llmApiKey: values.llmApiKey,
+      llmApiKey: finalApiKeys.dashscope || '',
+      llmApiKeys: finalApiKeys,
       asrParams: {
         clusteringThreshold: values.clusteringThreshold,
         vadThreshold: values.vadThreshold,
@@ -319,23 +364,21 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                 `}</style>
                 <Form.Item label="模型厂商" name="llmProvider">
                   <Select
-                    options={[{ value: 'dashscope', label: '阿里百炼（DashScope）' }]}
+                    onChange={handleProviderChange}
+                    options={llmProviders.map(p => ({ value: p.id, label: p.name }))}
                   />
                 </Form.Item>
                 <Form.Item label="模型" name="llmModel">
-                  <AutoComplete
-                    options={llmModelOptions}
-                    placeholder="选择或输入模型代码"
-                    filterOption={(input, option) =>
-                      (option?.value as string)?.toLowerCase().includes(input.toLowerCase())
-                    }
+                  <Select
+                    options={providerModels.map(m => ({ value: m.id, label: m.name }))}
+                    placeholder="选择模型"
                   />
                 </Form.Item>
                 <Form.Item label="API Key" name="llmApiKey">
                   <Input.Password placeholder="请输入 API Key" />
                 </Form.Item>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  API Key 用于调用大模型生成全文摘要、会议纪要等分析内容。可在阿里云百炼平台获取。
+                  API Key 用于调用大模型生成全文摘要、会议纪要等分析内容。每个厂商需单独配置 API Key。
                 </Text>
               </Form>
             ),

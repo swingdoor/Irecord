@@ -1,7 +1,7 @@
 import { ipcMain, dialog } from 'electron'
 import { writeFile } from 'fs/promises'
 import { getSettings } from '../utils/settings'
-import { callLLM } from '../llm/dashscope'
+import { callLLM } from '../llm/client'
 import { getSummaryPrompt, getSpeakersPrompt, getMinutesPrompt, getQaPrompt, getAskPrompt } from '../llm/prompts'
 import { updateResultAnalysis } from '../db/database'
 import { logError } from '../utils/errorHandler'

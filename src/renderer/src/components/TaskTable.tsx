@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Table, Input, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Segmented, Modal, message } from 'antd'
+import { Table, Input, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Segmented, Modal, Progress, message } from 'antd'
 import {
   SearchOutlined, EllipsisOutlined, LoadingOutlined, PlayCircleOutlined,
   CloseOutlined, DownloadOutlined, DeleteOutlined,
@@ -46,7 +46,19 @@ function ProcessingTimer({ startTime }: { startTime: number }) {
   return <Text type="secondary" style={{ fontSize: 12 }}>{formatDuration(elapsed)}</Text>
 }
 
-function StatusTag({ status, themeMode }: { status: string; themeMode: 'default' | 'monochrome' }) {
+const stageTextMap: Record<string, string> = {
+  initializing: '初始化',
+  segmenting: '分段中',
+  recognizing: '识别中',
+  done: '完成',
+}
+
+function StatusTag({ status, themeMode, progress }: { status: string; themeMode: 'default' | 'monochrome'; progress?: { stage: string; percent: number } }) {
+  // 当 processing 且有进度时，用 stage + percent 替代"处理中"
+  const processingText = progress
+    ? `${stageTextMap[progress.stage] || progress.stage} ${progress.percent}%`
+    : '处理中'
+
   if (themeMode === 'default') {
     // 默认主题：使用彩色
     const colorMap: Record<string, string> = {
@@ -59,7 +71,7 @@ function StatusTag({ status, themeMode }: { status: string; themeMode: 'default'
       recording: 'error',
     }
     const textMap: Record<string, string> = {
-      processing: '处理中',
+      processing: processingText,
       pending: '排队中',
       completed: '已完成',
       failed: '失败',
@@ -79,7 +91,7 @@ function StatusTag({ status, themeMode }: { status: string; themeMode: 'default'
 
   // 黑白主题：使用黑白灰 + 白色文字
   const map: Record<string, { color: string; text: string }> = {
-    processing: { color: '#18181b', text: '处理中' },
+    processing: { color: '#18181b', text: processingText },
     pending: { color: '#71717a', text: '排队中' },
     completed: { color: '#27272a', text: '已完成' },
     failed: { color: '#3f3f46', text: '失败' },
@@ -102,6 +114,7 @@ function StatusTag({ status, themeMode }: { status: string; themeMode: 'default'
 interface TaskTableProps {
   tasks: Task[]
   processingStartTime: number
+  taskProgress: Record<string, { stage: string; percent: number }>
   themeMode: 'default' | 'monochrome'
   onViewDetail: (task: Task) => void
   onDelete: (e: React.MouseEvent, id: string) => void
@@ -111,7 +124,7 @@ interface TaskTableProps {
   onDeepAnalysis?: (e: React.MouseEvent, taskId: string) => void
 }
 
-export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail, onDelete, onRestart, onCancel, onExportAudio, onDeepAnalysis }: TaskTableProps) {
+export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode, onViewDetail, onDelete, onRestart, onCancel, onExportAudio, onDeepAnalysis }: TaskTableProps) {
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
@@ -265,15 +278,23 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
     },
     { title: '时长', dataIndex: 'duration', key: 'duration', width: '8%', render: (d: number) => formatDuration(d) },
     { title: '字数', dataIndex: 'wordCount', key: 'wordCount', width: '8%', render: (w: number | null) => w != null ? w.toLocaleString() : '-' },
-    { title: '耗时', dataIndex: 'processingTime', key: 'processingTime', width: '8%', render: (t: number | null) => t != null ? formatDuration(t) : '-' },
+    { title: '耗时', dataIndex: 'processingTime', key: 'processingTime', width: '8%', render: (t: number | null, record: Task) => record.status === 'processing' ? <ProcessingTimer startTime={processingStartTime} /> : t != null ? formatDuration(t) : '-' },
     { title: '模型', dataIndex: 'modelType', key: 'modelType', width: '12%', render: (m: string) => getModelLabel(m) },
     { title: '日期', dataIndex: 'createdAt', key: 'createdAt', width: '17%', render: (d: string) => formatDate(d) },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: '12%',
-      render: (status: string) => (
+      title: '状态', dataIndex: 'status', key: 'status', width: '20%',
+      render: (status: string, record: Task) => (
         <Space size={4}>
-          <StatusTag status={status} themeMode={themeMode} />
-          {status === 'processing' && <ProcessingTimer startTime={processingStartTime} />}
+          <StatusTag status={status} themeMode={themeMode} progress={taskProgress[record.id]} />
+          {status === 'processing' && taskProgress[record.id] && (
+            <Progress
+              percent={taskProgress[record.id].percent}
+              size="small"
+              showInfo={false}
+              strokeColor={themeMode === 'default' ? '#1677ff' : '#18181b'}
+              style={{ width: 80, margin: 0 }}
+            />
+          )}
         </Space>
       ),
     },
@@ -373,8 +394,16 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Text strong ellipsis style={{ fontSize: 14, flex: 1, minWidth: 0 }}>{task.fileName}</Text>
-                    <StatusTag status={task.status} themeMode={themeMode} />
-                    {task.status === 'processing' && <ProcessingTimer startTime={processingStartTime} />}
+                    <StatusTag status={task.status} themeMode={themeMode} progress={taskProgress[task.id]} />
+                    {task.status === 'processing' && taskProgress[task.id] && (
+                      <Progress
+                        percent={taskProgress[task.id].percent}
+                        size="small"
+                        showInfo={false}
+                        strokeColor={themeMode === 'default' ? '#1677ff' : '#18181b'}
+                        style={{ width: 60, margin: 0 }}
+                      />
+                    )}
                   </div>
                   <Dropdown menu={{ items: getMenuItems(task), onClick: (e) => handleMenuClick(task, e.key, e) }} trigger={['click']}>
                     <Button type="text" size="small" icon={<EllipsisOutlined />} onClick={e => e.stopPropagation()} />
@@ -396,7 +425,10 @@ export function TaskTable({ tasks, processingStartTime, themeMode, onViewDetail,
                   </Col>
                   <Col span={12}>
                     <Text type="secondary" style={{ fontSize: 12 }}>耗时 </Text>
-                    <Text style={{ fontSize: 13 }}>{task.processingTime != null ? formatDuration(task.processingTime) : '-'}</Text>
+                    {task.status === 'processing'
+                      ? <ProcessingTimer startTime={processingStartTime} />
+                      : <Text style={{ fontSize: 13 }}>{task.processingTime != null ? formatDuration(task.processingTime) : '-'}</Text>
+                    }
                   </Col>
                   <Col span={12}>
                     <Text type="secondary" style={{ fontSize: 12 }}>模型 </Text>

@@ -56,6 +56,8 @@ const electronAPI = {
     ipcRenderer.invoke('get-settings'),
   saveSettings: (settings: Record<string, any>): Promise<{ success?: boolean; error?: string }> =>
     ipcRenderer.invoke('save-settings', settings),
+  getLlmProviders: (): Promise<Array<{ id: string; name: string; baseUrl: string; models: Array<{ id: string; name: string }> }>> =>
+    ipcRenderer.invoke('get-llm-providers'),
 
   // ===== 导出 =====
   exportTxt: (options: {

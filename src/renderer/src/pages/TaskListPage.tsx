@@ -32,6 +32,7 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [streamingModelAvailable, setStreamingModelAvailable] = useState(false)
   const [createDocModalOpen, setCreateDocModalOpen] = useState(false)
+  const [taskProgress, setTaskProgress] = useState<Record<string, { stage: string; percent: number }>>({})
 
   useEffect(() => {
     refreshTasks()
@@ -56,8 +57,19 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     const unsub = window.electronAPI.onTaskStatusChanged((data) => {
       if (data.startTime) setProcessingStartTime(data.startTime)
       refreshTasks()
+      // 清理已完成任务的进度
+      if (data.taskId) {
+        setTaskProgress(prev => {
+          const next = { ...prev }
+          delete next[data.taskId]
+          return next
+        })
+      }
     })
-    return () => { unsub() }
+    const unsubProgress = window.electronAPI.onTaskProgress((data) => {
+      setTaskProgress(prev => ({ ...prev, [data.taskId]: { stage: data.stage, percent: data.percent } }))
+    })
+    return () => { unsub(); unsubProgress() }
   }, [refreshTasks, refreshRealtimeRecordings, refreshKnowledgeDocs, refreshTemplates])
 
   // 轮询：当有 generating 状态的文档时，每 3 秒刷新
@@ -104,8 +116,13 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
 
     const result = await window.electronAPI.addFiles(selectedModel)
     if (result.errors?.length) setAddErrors(result.errors)
+    if (result.tasks?.length > 0) {
+      setActiveTab('upload')
+      const settings = await window.electronAPI.getSettings()
+      await window.electronAPI.saveSettings({ ...settings, activeTab: 'upload' })
+    }
     refreshTasks()
-  }, [refreshTasks, selectedModel])
+  }, [refreshTasks, selectedModel, setActiveTab])
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
@@ -132,9 +149,14 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     if (files.length > 0) {
       const result = await window.electronAPI.addDroppedFiles(files.map(f => f.path), selectedModel)
       if (result.errors?.length) setAddErrors(result.errors)
+      if (result.tasks?.length > 0) {
+        setActiveTab('upload')
+        const settings = await window.electronAPI.getSettings()
+        await window.electronAPI.saveSettings({ ...settings, activeTab: 'upload' })
+      }
       refreshTasks()
     }
-  }, [refreshTasks, selectedModel])
+  }, [refreshTasks, selectedModel, setActiveTab])
 
   const handleDelete = useCallback(async (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation()
@@ -252,6 +274,7 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
           <TaskTable
             tasks={tasks}
             processingStartTime={processingStartTime}
+            taskProgress={taskProgress}
             themeMode={themeMode}
             onViewDetail={handleViewDetail}
             onDelete={handleDelete}

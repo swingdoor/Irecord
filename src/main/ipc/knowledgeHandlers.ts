@@ -3,7 +3,7 @@ import { existsSync } from 'fs'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { getSettings } from '../utils/settings'
-import { callLLM } from '../llm/dashscope'
+import { callLLM } from '../llm/client'
 import { getKnowledgeDocPrompt, getPolishPrompt } from '../llm/prompts'
 import {
   createKnowledgeDoc,

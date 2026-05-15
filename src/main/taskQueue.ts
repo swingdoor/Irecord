@@ -6,7 +6,7 @@ import { getNextPendingTask, hasProcessingTask, updateTask, saveResult, updateRe
 import { getQwen3AsrModelPath, getSenseVoiceModelPath, getVadModelPath, getSegmentationModelPath, getEmbeddingModelPath } from './utils/paths'
 import { convertToWav, needsConversion } from './audio/ffmpeg'
 import { deleteTempFile } from './audio/temp'
-import { callLLM } from './llm/dashscope'
+import { callLLM } from './llm/client'
 import { getSummaryPrompt, getSpeakersPrompt, getMinutesPrompt, getQaPrompt } from './llm/prompts'
 import { getSettings, getAsrParams } from './utils/settings'
 

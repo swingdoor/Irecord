@@ -1,18 +1,8 @@
 node_modules/
 dist/
 
-# 模型文件（太大，不提交）
-resources/models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25/
-resources/models/sherpa-onnx-funasr-nano-int8-2025-12-30/
-resources/models/silero-vad/silero_vad.onnx
-resources/models/speaker-diarization/*.onnx
-resources/models/speaker-diarization/*.onnx
-*.tar.bz2
-
-# FFmpeg 二进制
-resources/ffmpeg/ffmpeg.exe
-resources/ffmpeg/ffplay.exe
-resources/ffmpeg/ffprobe.exe
+# 资源文件（模型、FFmpeg 等，太大不提交）
+resources/
 
 # 测试脚本
 test-electron-sherpa.js

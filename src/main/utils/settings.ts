@@ -50,6 +50,7 @@ export interface AppSettings {
   llmProvider?: string
   llmModel?: string
   llmApiKey?: string
+  llmApiKeys?: Record<string, string>
   themeMode?: 'default' | 'monochrome'
   asrParams?: Partial<AsrParams>
   realtimeParams?: Partial<RealtimeRecordingParams>
