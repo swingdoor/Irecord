@@ -59,6 +59,28 @@ const electronAPI = {
   getLlmProviders: (): Promise<Array<{ id: string; name: string; baseUrl: string; models: Array<{ id: string; name: string }> }>> =>
     ipcRenderer.invoke('get-llm-providers'),
 
+  // ===== 模型管理 =====
+  getModelRegistry: (): Promise<{ models: any[]; realtimeModels: any[]; offlineModels: any[]; auxiliaryModels: any[]; downloadPath: string; ffmpegExists: boolean; defaultModelPath: string; defaultFfmpegPath: string }> =>
+    ipcRenderer.invoke('get-model-registry'),
+  getEngineRegistry: (): Promise<Array<{ id: string; name: string; type: string; description: string; models: string[]; available: boolean }>> =>
+    ipcRenderer.invoke('get-engine-registry'),
+  downloadModel: (modelId: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('download-model', modelId),
+  cancelModelDownload: (modelId: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('cancel-model-download', modelId),
+  deleteModel: (modelId: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('delete-model', modelId),
+  onModelDownloadProgress: (callback: (data: { modelId: string; percent: number; downloadedBytes: number; totalBytes: number }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('model-download-progress', handler)
+    return () => ipcRenderer.removeListener('model-download-progress', handler)
+  },
+  onModelDownloadComplete: (callback: (data: { modelId: string; success: boolean; error?: string }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('model-download-complete', handler)
+    return () => ipcRenderer.removeListener('model-download-complete', handler)
+  },
+
   // ===== 导出 =====
   exportTxt: (options: {
     text: string

@@ -1,14 +1,40 @@
+# Dependencies
 node_modules/
-dist/
 
-# 资源文件（模型、FFmpeg 等，太大不提交）
+# Build output
+dist/
+release/
+
+# Resources (models, FFmpeg, etc.)
 resources/
 
-# 测试脚本
-test-electron-sherpa.js
+# Claude AI
+.claude/
 
-# 系统文件
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System files
 *.log
 .DS_Store
 Thumbs.db
-release/
+desktop.ini
+
+# Backup files
+*.backup
+*.bak
+*.tmp
+
+# Test files
+test-electron-sherpa.js
+
+# Temporary build configs
+electron-builder-full.json

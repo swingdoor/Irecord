@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { getSettings } from './settings'
+import { MODEL_REGISTRY, type ModelEntry } from '../models/registry'
 
 /**
  * 获取资源文件路径
@@ -17,7 +18,39 @@ export function getResourcePath(...paths: string[]): string {
 }
 
 /**
- * 获取模型目录路径（优先使用用户配置）
+ * 获取用户数据目录下的模型路径
+ */
+export function getUserModelsPath(): string {
+  return join(app.getPath('userData'), 'models')
+}
+
+/**
+ * 分层查找模型目录
+ * 查找顺序：自定义 modelDir → userData/models/ → resourcesPath/resources/models/
+ * 返回 { path, location } 或 null
+ */
+export function findModelDir(folderName: string): { path: string; location: 'custom' | 'user' | 'bundled' } | null {
+  const settings = getSettings()
+
+  // 1. 自定义 modelDir
+  if (settings.modelDir) {
+    const customPath = join(settings.modelDir, folderName)
+    if (existsSync(customPath)) return { path: customPath, location: 'custom' }
+  }
+
+  // 2. userData/models/
+  const userPath = join(getUserModelsPath(), folderName)
+  if (existsSync(userPath)) return { path: userPath, location: 'user' }
+
+  // 3. resourcesPath/resources/models/
+  const bundledPath = getResourcePath('models', folderName)
+  if (existsSync(bundledPath)) return { path: bundledPath, location: 'bundled' }
+
+  return null
+}
+
+/**
+ * 获取模型目录路径（兼容旧 API，优先使用 findModelDir）
  */
 export function getModelsPath(): string {
   const settings = getSettings()
@@ -28,7 +61,7 @@ export function getModelsPath(): string {
 }
 
 /**
- * 获取 ffmpeg 路径（优先使用用户配置）
+ * 获取 ffmpeg 路径（优先用户配置，fallback 内置路径）
  */
 export function getFfmpegPath(): string {
   const settings = getSettings()
@@ -39,7 +72,7 @@ export function getFfmpegPath(): string {
 }
 
 /**
- * 获取 ffprobe 路径（优先使用用户配置）
+ * 获取 ffprobe 路径（优先用户配置，fallback 内置路径）
  */
 export function getFfprobePath(): string {
   const settings = getSettings()
@@ -53,16 +86,16 @@ export function getFfprobePath(): string {
  * 获取 Qwen3-ASR 模型路径
  */
 export function getQwen3AsrModelPath(): string {
-  const modelDir = join(getModelsPath(), 'sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25')
-  return modelDir
+  const found = findModelDir('sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25')
+  return found?.path ?? join(getModelsPath(), 'sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25')
 }
 
 /**
  * 获取 SenseVoice Small 模型路径
  */
 export function getSenseVoiceModelPath(): string {
-  const modelDir = join(getModelsPath(), 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17')
-  return modelDir
+  const found = findModelDir('sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17')
+  return found?.path ?? join(getModelsPath(), 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17')
 }
 
 /**
@@ -96,7 +129,8 @@ export function checkModelExists(): boolean {
  * 获取 Silero VAD 模型路径
  */
 export function getVadModelPath(): string {
-  return join(getModelsPath(), 'silero-vad', 'silero_vad.onnx')
+  const found = findModelDir('silero-vad')
+  return found ? join(found.path, 'silero_vad.onnx') : join(getModelsPath(), 'silero-vad', 'silero_vad.onnx')
 }
 
 /**
@@ -110,7 +144,8 @@ export function checkVadModelExists(): boolean {
  * 获取说话人分离模型目录路径
  */
 export function getDiarizationModelPath(): string {
-  return join(getModelsPath(), 'speaker-diarization')
+  const found = findModelDir('speaker-diarization')
+  return found?.path ?? join(getModelsPath(), 'speaker-diarization')
 }
 
 /**
@@ -152,7 +187,8 @@ export interface ModelInfo {
  * 获取流式识别模型路径
  */
 export function getStreamingZipformerModelPath(): string {
-  return join(getModelsPath(), 'sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30')
+  const found = findModelDir('sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30')
+  return found?.path ?? join(getModelsPath(), 'sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30')
 }
 
 /**
