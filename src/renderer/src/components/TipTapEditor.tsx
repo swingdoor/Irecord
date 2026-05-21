@@ -167,7 +167,7 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
       </div>
 
       {/* BubbleMenu 浮动面板 */}
-      <div ref={bubbleRef} style={{ visibility: 'visible' }}>
+      <div ref={bubbleRef} style={{ visibility: 'hidden' }}>
         {polishResult ? (
           <Card size="small" style={{ width: 380, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
             <div style={{ marginBottom: 8 }}>

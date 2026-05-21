@@ -48,21 +48,34 @@ export function registerKnowledgeHandlers(): void {
 
       // 收集素材文本
       const texts: string[] = []
+      let firstSourceName = ''
       for (const src of params.sourceIds) {
         if (src.type === 'task') {
+          const task = await getTask(src.id)
           const result = await getResult(src.id)
           if (result?.text) texts.push(result.text)
+          if (!firstSourceName && task?.fileName) {
+            firstSourceName = task.fileName.replace(/\.[^.]+$/, '')
+          }
         } else if (src.type === 'realtime') {
           const rec = await getRealtimeRecording(src.id)
           if (rec?.text) texts.push(rec.text)
+          if (!firstSourceName && rec?.title) {
+            firstSourceName = rec.title
+          }
         }
       }
 
       if (texts.length === 0) return { error: '未找到有效的转写文本' }
 
+      // 确定性标题：模板名称：源文件名
+      const docTitle = firstSourceName
+        ? `${template.name}：${firstSourceName}`
+        : template.name
+
       // 先创建一条 generating 状态的记录
       const doc = await createKnowledgeDoc({
-        title: '生成中...',
+        title: docTitle,
         content: '',
         status: 'generating',
         templateId: params.templateId,
@@ -82,13 +95,8 @@ export function registerKnowledgeHandlers(): void {
             cleanContent = cleanContent.replace(/^```(?:html)?\s*/, '').replace(/\s*```$/, '')
           }
 
-          // 从 HTML 中提取标题
-          const titleMatch = cleanContent.match(/<h1[^>]*>(.*?)<\/h1>/i)
-          const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : '未命名文档'
-
-          // 更新为 completed
+          // 更新为 completed，保留确定性标题
           await updateKnowledgeDoc(doc.id, {
-            title,
             content: cleanContent,
             status: 'completed',
           })

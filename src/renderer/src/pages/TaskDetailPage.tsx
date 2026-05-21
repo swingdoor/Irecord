@@ -67,8 +67,10 @@ export default function TaskDetailPage() {
       includeTimestamps: hasSegments,
       segments: currentResult.segments,
       keywords: currentResult.keywords,
+      fileName: currentTask?.fileName,
+      label: '转写',
     })
-  }, [currentResult])
+  }, [currentResult, currentTask])
 
   const handleSeek = useCallback((time: number) => {
     playerRef.current?.seekTo(time)
@@ -138,6 +140,7 @@ export default function TaskDetailPage() {
               aiMinutes={currentResult.aiMinutes}
               aiQa={currentResult.aiQa}
               taskId={currentTask.id}
+              fileName={currentTask.fileName}
             />
           </div>
         </Col>

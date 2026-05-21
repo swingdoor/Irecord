@@ -76,10 +76,17 @@ export function registerAnalysisHandlers(): void {
     includeTimestamps: boolean
     segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
     keywords?: Array<{ word: string; score: number }>
+    fileName?: string
+    label?: string
   }) => {
+    const baseName = options.fileName ? options.fileName.replace(/\.[^.]+$/, '') : ''
+    const defaultPath = baseName && options.label
+      ? `${baseName}_${options.label}.txt`
+      : 'transcription.txt'
+
     const result = await dialog.showSaveDialog({
       title: '导出转写结果',
-      defaultPath: 'transcription.txt',
+      defaultPath,
       filters: [{ name: '文本文件', extensions: ['txt'] }]
     })
 

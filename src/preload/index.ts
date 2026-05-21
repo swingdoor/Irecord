@@ -87,6 +87,8 @@ const electronAPI = {
     includeTimestamps: boolean
     segments?: Array<{ text: string; start: number; end: number; speaker?: string }>
     keywords?: Array<{ word: string; score: number }>
+    fileName?: string
+    label?: string
   }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('export-txt', options),
   exportAudio: (filePath: string): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
@@ -152,6 +154,7 @@ const electronAPI = {
     text: string
     includeTimestamps: boolean
     segments?: Array<{ text: string; start: number; end: number }>
+    title?: string
   }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('export-realtime-recording-txt', params),
   createProofreadingTask: (recordingId: string): Promise<{ taskId?: string; error?: string }> =>

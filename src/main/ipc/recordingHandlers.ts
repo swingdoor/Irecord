@@ -240,11 +240,16 @@ export function registerRecordingHandlers(): void {
     text: string
     includeTimestamps: boolean
     segments?: Array<{ text: string; start: number; end: number }>
+    title?: string
   }) => {
     try {
+      const defaultPath = params.title
+        ? `${params.title}_转写.txt`
+        : `录音_${new Date().toLocaleString('zh-CN', { hour12: false }).replace(/[/:\\s]/g, '-')}.txt`
+
       const result = await dialog.showSaveDialog({
         title: '导出文本',
-        defaultPath: `录音_${new Date().toLocaleString('zh-CN', { hour12: false }).replace(/[/:\\s]/g, '-')}.txt`,
+        defaultPath,
         filters: [{ name: '文本文件', extensions: ['txt'] }]
       })
 

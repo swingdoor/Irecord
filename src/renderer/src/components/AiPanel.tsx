@@ -16,6 +16,7 @@ interface AiPanelProps {
   aiMinutes?: string | null
   aiQa?: string | null
   taskId: string
+  fileName?: string
 }
 
 interface RegenState { loading: boolean; result: string | null; error: string | null }
@@ -194,7 +195,7 @@ function RenderAsk({ raw }: { raw: string }) {
   )
 }
 
-export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa, taskId }: AiPanelProps) {
+export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa, taskId, fileName }: AiPanelProps) {
   const [regen, setRegen] = useState<Record<string, RegenState>>({})
   const [question, setQuestion] = useState('')
   const [askLoading, setAskLoading] = useState(false)
@@ -231,8 +232,8 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
     const content = regen[type]?.result || dbData[type]
     if (!content) return
     const plainText = toPlainText(type, content)
-    await window.electronAPI.exportTxt({ text: plainText, includeTimestamps: false })
-  }, [regen, dbData])
+    await window.electronAPI.exportTxt({ text: plainText, includeTimestamps: false, fileName, label })
+  }, [regen, dbData, fileName])
 
   const handleAsk = useCallback(async () => {
     if (!question.trim()) return
@@ -258,7 +259,7 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
     const data = tryParseJSON(askResult)
     const answer = data?.answer
     if (answer) {
-      await window.electronAPI.exportTxt({ text: answer, includeTimestamps: false })
+      await window.electronAPI.exportTxt({ text: answer, includeTimestamps: false, fileName, label: '提问' })
     }
   }, [askResult])
 

@@ -55,7 +55,8 @@ export default function RealtimeRecordingDetailPage() {
     await window.electronAPI.exportRealtimeRecordingTxt({
       text: currentRealtimeRecording.text,
       includeTimestamps: true,
-      segments
+      segments,
+      title: currentRealtimeRecording.title,
     })
   }, [currentRealtimeRecording])
 
