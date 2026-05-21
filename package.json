@@ -8,8 +8,8 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "build:win": "npm run build && electron-builder --win --x64 --config electron-builder-full.json",
-    "build:win:portable": "npm run build && electron-builder --dir --config electron-builder-full.json && node -e \"const v=require('./package.json').version,fs=require('fs'),p='release/'+v;fs.existsSync(p+'/win-unpacked')&&fs.renameSync(p+'/win-unpacked',p+'/iRecord-'+v+'-win-x64')\""
+    "build:win": "npm run build && electron-builder --win --x64",
+    "build:win:portable": "npm run build && electron-builder --dir && node -e \"const v=require('./package.json').version,fs=require('fs'),p='release/'+v;fs.existsSync(p+'/win-unpacked')&&fs.renameSync(p+'/win-unpacked',p+'/iRecord-'+v+'-win-x64')\""
   },
   "build": {
     "appId": "com.irecord.app",
@@ -41,6 +41,26 @@
       {
         "from": "src/main/keywords/extract.js",
         "to": "extract.js"
+      },
+      {
+        "from": "resources/ffmpeg",
+        "to": "resources/ffmpeg"
+      },
+      {
+        "from": "resources/models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30",
+        "to": "resources/models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30"
+      },
+      {
+        "from": "resources/models/silero-vad",
+        "to": "resources/models/silero-vad"
+      },
+      {
+        "from": "resources/models/speaker-diarization",
+        "to": "resources/models/speaker-diarization"
+      },
+      {
+        "from": "resources/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+        "to": "resources/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
       }
     ],
     "asar": true,
