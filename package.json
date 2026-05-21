@@ -1,6 +1,6 @@
 {
   "name": "irecord",
-  "version": "0.8.1",
+  "version": "0.8.3",
   "description": "你说我记 - 本地语音识别转写工具",
   "main": "dist/main/index.js",
   "scripts": {
@@ -80,6 +80,8 @@
     "nodejieba": "^3.5.8",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "sherpa-onnx-node": "^1.12.38",
     "sql.js": "^1.14.1",
     "tar": "^7.5.15",

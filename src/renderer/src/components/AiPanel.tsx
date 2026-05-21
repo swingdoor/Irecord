@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react'
 import { Typography, Tabs, Spin, Button, Input, Space, Alert, Empty, Card, Divider, Tooltip, message } from 'antd'
 import { SendOutlined, ReloadOutlined, CopyOutlined, DownloadOutlined, UserOutlined, CheckCircleOutlined, QuestionCircleOutlined, MessageOutlined } from '@ant-design/icons'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const { Text, Title, Paragraph } = Typography
 const { TextArea } = Input
@@ -144,13 +146,51 @@ function RenderAsk({ raw }: { raw: string }) {
   const data = tryParseJSON(raw)
   const answer = data?.answer
   if (!answer) return <Alert type="error" message="AI 分析失败" description="请重新生成" showIcon />
+
+  // 按段落分割（\n\n 或多个换行符）
+  const paragraphs = answer.split(/\n\n+/).filter(p => p.trim())
+
   return (
-    <Card size="small" style={{ background: '#f6f8fa' }}>
-      <Space align="start">
-        <MessageOutlined style={{ color: '#52c41a', fontSize: 15, marginTop: 2 }} />
-        <Paragraph style={{ fontSize: 14, lineHeight: 1.8, margin: 0, whiteSpace: 'pre-wrap' }}>{answer}</Paragraph>
-      </Space>
-    </Card>
+    <Space direction="vertical" size={12} style={{ width: '100%', marginBottom: 16 }}>
+      {paragraphs.map((para, i) => (
+        <Card key={i} size="small" style={{ background: '#f6f8fa', border: '1px solid #e8e8e8' }}>
+          <Space align="start" style={{ width: '100%' }}>
+            <MessageOutlined style={{ color: '#52c41a', fontSize: 15, marginTop: 2, flexShrink: 0 }} />
+            <div style={{ flex: 1, fontSize: 14, lineHeight: 1.8, color: '#262626' }}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  // 段落
+                  p: ({ children }) => <Text style={{ display: 'block', marginBottom: 8 }}>{children}</Text>,
+                  // 加粗
+                  strong: ({ children }) => <Text strong>{children}</Text>,
+                  // 斜体
+                  em: ({ children }) => <Text italic>{children}</Text>,
+                  // 标题
+                  h1: ({ children }) => <Title level={4} style={{ marginTop: 8, marginBottom: 8 }}>{children}</Title>,
+                  h2: ({ children }) => <Title level={5} style={{ marginTop: 8, marginBottom: 8 }}>{children}</Title>,
+                  h3: ({ children }) => <Text strong style={{ display: 'block', fontSize: 15, marginTop: 8, marginBottom: 8 }}>{children}</Text>,
+                  // 无序列表
+                  ul: ({ children }) => <ul style={{ marginLeft: 20, marginBottom: 8 }}>{children}</ul>,
+                  ol: ({ children }) => <ol style={{ marginLeft: 20, marginBottom: 8 }}>{children}</ol>,
+                  li: ({ children }) => <li style={{ marginBottom: 4 }}>{children}</li>,
+                  // 代码
+                  code: ({ children }) => <Text code>{children}</Text>,
+                  // 引用
+                  blockquote: ({ children }) => (
+                    <div style={{ borderLeft: '3px solid #d9d9d9', paddingLeft: 12, marginBottom: 8, color: '#595959' }}>
+                      {children}
+                    </div>
+                  ),
+                }}
+              >
+                {para}
+              </ReactMarkdown>
+            </div>
+          </Space>
+        </Card>
+      ))}
+    </Space>
   )
 }
 
@@ -197,6 +237,34 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
   const handleAsk = useCallback(async () => {
     if (!question.trim()) return
     setAskLoading(true); setAskResult(null); setAskError(null)
+    const res = await window.electronAPI.llmAnalyze({ type: 'ask', text, question })
+    setAskLoading(false)
+    if (res.error) setAskError(res.error)
+    else setAskResult(res.result || null)
+  }, [text, question])
+
+  const handleCopyAsk = useCallback(() => {
+    if (!askResult) return
+    const data = tryParseJSON(askResult)
+    const answer = data?.answer
+    if (answer) {
+      navigator.clipboard.writeText(answer)
+      message.success('已复制')
+    }
+  }, [askResult])
+
+  const handleExportAsk = useCallback(async () => {
+    if (!askResult) return
+    const data = tryParseJSON(askResult)
+    const answer = data?.answer
+    if (answer) {
+      await window.electronAPI.exportTxt({ text: answer, includeTimestamps: false })
+    }
+  }, [askResult])
+
+  const handleRegenerateAsk = useCallback(async () => {
+    if (!question.trim()) return
+    setAskLoading(true); setAskError(null)
     const res = await window.electronAPI.llmAnalyze({ type: 'ask', text, question })
     setAskLoading(false)
     if (res.error) setAskError(res.error)
@@ -259,12 +327,19 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
                   <TextArea
                     value={question} onChange={e => setQuestion(e.target.value)}
                     placeholder="输入你的问题..."
-                    autoSize={{ minRows: 2, maxRows: 4 }}
+                    autoSize={{ minRows: 1, maxRows: 4 }}
                     onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); handleAsk() } }}
                     style={{ flex: 1 }}
                   />
                   <Button type="primary" icon={<SendOutlined />} onClick={handleAsk} loading={askLoading} style={{ height: 'auto' }} />
                 </Space.Compact>
+                {askResult && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, gap: 4 }}>
+                    <Tooltip title="重新生成"><Button type="text" size="small" icon={<ReloadOutlined />} onClick={handleRegenerateAsk} /></Tooltip>
+                    <Tooltip title="复制"><Button type="text" size="small" icon={<CopyOutlined />} onClick={handleCopyAsk} /></Tooltip>
+                    <Tooltip title="导出 TXT"><Button type="text" size="small" icon={<DownloadOutlined />} onClick={handleExportAsk} /></Tooltip>
+                  </div>
+                )}
                 <div className="ai-scroll-area" style={{ flex: 1, ...scrollStyle }}>
                   {askLoading && <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" tip="思考中..." /></div>}
                   {askError && <Alert type="error" message={askError} showIcon />}
