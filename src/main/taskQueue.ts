@@ -105,6 +105,7 @@ async function processNext(win: BrowserWindow) {
       currentProcess.stderr?.on('data', (chunk) => { stderr += chunk.toString() })
       currentProcess.on('close', (code) => {
         currentProcess = null
+        if (canceledFlag) return // 主动取消，不报错
         if (code !== 0) reject(new Error(stderr || `子进程退出，代码: ${code}`))
       })
       currentProcess.on('error', (err) => { currentProcess = null; reject(err) })

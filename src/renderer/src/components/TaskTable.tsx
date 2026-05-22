@@ -136,9 +136,11 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
     const r = data.result
     await window.electronAPI.exportTxt({
       text: r.text,
-      includeTimestamps: !!(r.segments && JSON.parse(r.segments).length > 0),
-      segments: r.segments ? JSON.parse(r.segments) : undefined,
-      keywords: r.keywords ? JSON.parse(r.keywords) : undefined,
+      includeTimestamps: !!(r.segments && r.segments.length > 0),
+      segments: r.segments,
+      keywords: r.keywords,
+      fileName: data.task?.fileName,
+      label: '转写',
     })
   }, [])
 
