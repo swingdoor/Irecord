@@ -137,6 +137,14 @@ export default function KnowledgeDetailPage() {
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
   }
 
+  // 从 HTML 内容提取纯文本并统计字数（去标签、去空白，与转写字数口径一致）
+  const getWordCount = (html: string): number => {
+    if (!html) return 0
+    const tmp = document.createElement('div')
+    tmp.innerHTML = html
+    return (tmp.textContent || '').replace(/\s/g, '').length
+  }
+
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
@@ -178,6 +186,7 @@ export default function KnowledgeDetailPage() {
             <Space size={16} style={{ fontSize: 12 }}>
               <Text type="secondary">来源: {getSourceNames().join(' · ')}</Text>
               <Text type="secondary">模板: {getTemplateName()}</Text>
+              <Text type="secondary">字数: {getWordCount(content).toLocaleString()}</Text>
               {lastSaved && <Text type="secondary">上次保存: {formatSavedTime(lastSaved)}</Text>}
             </Space>
           </div>
