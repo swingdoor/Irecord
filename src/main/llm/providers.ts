@@ -16,6 +16,7 @@ export const PROVIDERS: Record<string, LLMProvider> = {
     name: '阿里百炼（DashScope）',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: [
+      { id: 'qwen3.7-max', name: 'Qwen3.7-Max' },
       { id: 'qwen3-max', name: 'Qwen3-Max' },
       { id: 'qwen3.6-plus', name: 'Qwen3.6-Plus' },
       { id: 'qwen3.5-flash', name: 'Qwen3.5-Flash' },

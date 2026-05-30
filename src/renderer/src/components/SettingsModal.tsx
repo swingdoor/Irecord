@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Modal, Tabs, Form, Select, Input, InputNumber, Typography, Button, Space, Progress, Tag, message, Tooltip } from 'antd'
-import { DownloadOutlined, DeleteOutlined, CloseCircleOutlined, CheckCircleFilled, QuestionCircleOutlined } from '@ant-design/icons'
+import { Modal, Tabs, Form, Select, Input, InputNumber, Switch, Typography, Button, Space, Progress, Tag, message, Tooltip } from 'antd'
+import { DownloadOutlined, DeleteOutlined, CloseCircleOutlined, CheckCircleFilled, QuestionCircleOutlined, PlusOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
 
@@ -107,6 +107,9 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
   const [llmProviders, setLlmProviders] = useState<LLMProviderInfo[]>([])
   const [selectedProvider, setSelectedProvider] = useState('dashscope')
   const [providerModels, setProviderModels] = useState<Array<{ id: string; name: string }>>([])
+  const [modelSearch, setModelSearch] = useState('')
+  // 用户自定义的模型代码，按厂商分组持久化（value 即原始 code，直传 API）
+  const [customModels, setCustomModels] = useState<Record<string, string[]>>({})
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [modelRegistry, setModelRegistry] = useState<ModelRegistryEntry[]>([])
   const [realtimeModels, setRealtimeModels] = useState<ModelRegistryEntry[]>([])
@@ -154,6 +157,17 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
         }
         setApiKeys(keys)
 
+        // 迁移：若已保存的 llmModel 是个非内置的 code（旧版自定义输入），
+        // 补进当前厂商的自定义列表，保证能回显且可删除
+        const savedCustom: Record<string, string[]> = { ...(settings.llmCustomModels || {}) }
+        const savedModel = settings.llmModel
+        const builtinIds = (providerInfo?.models || []).map((m: { id: string }) => m.id)
+        if (savedModel && !builtinIds.includes(savedModel)) {
+          const list = savedCustom[provider] || []
+          if (!list.includes(savedModel)) savedCustom[provider] = [...list, savedModel]
+        }
+        setCustomModels(savedCustom)
+
         const asrParams = settings.asrParams || {}
         const engineConfig = settings.realtimeEngineConfig || {}
         const zipformerParams = engineConfig.zipformerParams || settings.realtimeParams || {}
@@ -169,8 +183,9 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
           vadThreshold: asrParams.vadThreshold ?? 0.5,
           minSilenceDuration: asrParams.minSilenceDuration ?? 1.5,
           minSpeechDuration: asrParams.minSpeechDuration ?? 1.0,
-          maxSegmentDuration: asrParams.maxSegmentDuration ?? 30,
+          maxSegmentDuration: asrParams.maxSegmentDuration ?? 60,
           maxDurationSeconds: asrParams.maxDurationSeconds ?? 7200,
+          debugAsrLog: settings.debugAsrLog ?? false,
           realtimeEngine: engineConfig.engine || 'qwen3-simulated-streaming',
           zipformerAudioGain: zipformerParams.audioGain ?? 2.0,
           rule1MinTrailingSilence: zipformerParams.rule1MinTrailingSilence ?? 2.4,
@@ -259,6 +274,7 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
     setApiKeys(prev => ({ ...prev, [selectedProvider]: currentKey }))
 
     setSelectedProvider(providerId)
+    setModelSearch('')
     const providerInfo = llmProviders.find(p => p.id === providerId)
     const models = providerInfo?.models || []
     setProviderModels(models)
@@ -268,6 +284,32 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
       llmModel: models[0]?.id || '',
       llmApiKey: apiKeys[providerId] || '',
     })
+  }
+
+  // 把输入的模型代码加入当前厂商的自定义列表，并选中它（code 直传 API，无需映射）
+  const addCustomModel = (code: string) => {
+    const c = code.trim()
+    if (!c) return
+    const builtinIds = providerModels.map(m => m.id)
+    setCustomModels(prev => {
+      const list = prev[selectedProvider] || []
+      // 内置已有或自定义已有则不重复添加
+      if (builtinIds.includes(c) || list.includes(c)) return prev
+      return { ...prev, [selectedProvider]: [...list, c] }
+    })
+    form.setFieldValue('llmModel', c)
+    setModelSearch('')
+  }
+
+  // 删除当前厂商的某个自定义模型代码；若删的正是已选中的，回退到首个内置模型
+  const removeCustomModel = (code: string) => {
+    setCustomModels(prev => {
+      const list = (prev[selectedProvider] || []).filter(m => m !== code)
+      return { ...prev, [selectedProvider]: list }
+    })
+    if (form.getFieldValue('llmModel') === code) {
+      form.setFieldValue('llmModel', providerModels[0]?.id || '')
+    }
   }
 
   const handleOk = async () => {
@@ -283,6 +325,8 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
       llmModel: values.llmModel,
       llmApiKey: finalApiKeys.dashscope || '',
       llmApiKeys: finalApiKeys,
+      llmCustomModels: customModels,
+      debugAsrLog: values.debugAsrLog ?? false,
       asrParams: {
         clusteringThreshold: values.clusteringThreshold,
         vadThreshold: values.vadThreshold,
@@ -657,7 +701,7 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                   label={
                     <span className="label-with-tooltip">
                       最长分段
-                      <Tooltip title="超长语音段会被强制切分（默认 30）">
+                      <Tooltip title="超长语音段会被强制切分（默认 60）">
                         <QuestionCircleOutlined />
                       </Tooltip>
                     </span>
@@ -679,6 +723,20 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                 >
                   <InputNumberWithUnit min={600} max={14400} step={600} unit="秒" />
                 </Form.Item>
+                <Form.Item
+                  label={
+                    <span className="label-with-tooltip">
+                      诊断日志
+                      <Tooltip title="开启后，文件识别过程会写入诊断日志到用户数据目录的 logs 文件夹，用于排查识别报错。正式使用可关闭。">
+                        <QuestionCircleOutlined />
+                      </Tooltip>
+                    </span>
+                  }
+                  name="debugAsrLog"
+                  valuePropName="checked"
+                >
+                  <Switch />
+                </Form.Item>
               </Form>
             ),
           },
@@ -698,16 +756,93 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                 </Form.Item>
                 <Form.Item label="模型" name="llmModel">
                   <Select
-                    options={providerModels.map(m => ({ value: m.id, label: m.name }))}
-                    placeholder="选择模型"
+                    showSearch
+                    placeholder="选择或输入模型代码"
+                    notFoundContent={null}
+                    searchValue={modelSearch}
+                    onSearch={setModelSearch}
+                    onChange={() => setModelSearch('')}
+                    filterOption={(input, option) =>
+                      // 只对真实模型项做过滤；"添加"项始终保留
+                      (option as any)?.kind === 'add'
+                        ? true
+                        : String((option as any)?.code ?? '').toLowerCase().includes(input.toLowerCase())
+                    }
+                    optionRender={(option) => {
+                      const data = option.data as any
+                      if (data.kind === 'add') {
+                        return (
+                          <Space>
+                            <PlusOutlined />
+                            <span>添加自定义模型：<Text code>{data.code}</Text></span>
+                          </Space>
+                        )
+                      }
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            <Text code>{data.code}</Text>
+                            {data.builtinName && <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>{data.builtinName}</Text>}
+                          </span>
+                          {data.kind === 'custom' && (
+                            <DeleteOutlined
+                              style={{ color: '#999', flexShrink: 0 }}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                removeCustomModel(data.code)
+                              }}
+                            />
+                          )}
+                        </div>
+                      )
+                    }}
+                    onSelect={(value) => {
+                      // 选中"添加"项时，value 形如 "__add__:<code>"，转为真正添加动作
+                      if (typeof value === 'string' && value.startsWith('__add__:')) {
+                        addCustomModel(value.slice('__add__:'.length))
+                      }
+                    }}
+                    options={(() => {
+                      // value 一律是原始模型代码，直传 API，无需映射
+                      const builtinIds = providerModels.map(m => m.id)
+                      const customList = customModels[selectedProvider] || []
+                      const opts: any[] = []
+                      // 内置模型（显示 code + 友好名）
+                      for (const m of providerModels) {
+                        opts.push({ value: m.id, code: m.id, builtinName: m.name, label: m.id, kind: 'builtin' })
+                      }
+                      // 已保存的自定义模型（可删除）
+                      for (const code of customList) {
+                        if (builtinIds.includes(code)) continue
+                        opts.push({ value: code, code, label: code, kind: 'custom' })
+                      }
+                      // 兜底：当前选中值既非内置也不在自定义列表时，补一项以正确回显
+                      const current = form.getFieldValue('llmModel')
+                      if (current && !builtinIds.includes(current) && !customList.includes(current)) {
+                        opts.push({ value: current, code: current, label: current, kind: 'custom' })
+                      }
+                      // 正在输入且不存在的代码 → 提供"添加"项
+                      const typed = modelSearch.trim()
+                      if (typed && !builtinIds.includes(typed) && !customList.includes(typed)) {
+                        opts.push({ value: `__add__:${typed}`, code: typed, label: typed, kind: 'add' })
+                      }
+                      return opts
+                    })()}
                   />
+                </Form.Item>
+                <Form.Item wrapperCol={{ offset: 5, span: 17 }} style={{ marginTop: -4, marginBottom: 12 }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    输入模型代码（如 qwen-plus-latest）可添加自定义模型，自定义项可删除。
+                  </Text>
                 </Form.Item>
                 <Form.Item label="API Key" name="llmApiKey">
                   <Input.Password placeholder="请输入 API Key" />
                 </Form.Item>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  API Key 用于调用大模型生成全文摘要、会议纪要等分析内容。每个厂商需单独配置 API Key。
-                </Text>
+                <Form.Item wrapperCol={{ offset: 5, span: 17 }} style={{ marginTop: -4, marginBottom: 0 }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    API Key 用于调用大模型生成全文摘要、会议纪要等分析内容。每个厂商需单独配置 API Key。
+                  </Text>
+                </Form.Item>
               </Form>
             ),
           },

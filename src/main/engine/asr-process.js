@@ -9,6 +9,17 @@ const path = require('path');
 const fs = require('fs');
 const sherpa = require('sherpa-onnx-node');
 
+// 直接拿到 native addon，用于在 sherpa 自带的 JSON.parse 崩溃时兜底
+// （某些音频段 Qwen3-ASR 输出的 token 里混入了未转义的控制字符，
+//   sherpa C++ 层序列化出的 JSON 非法，getResult 内部的 JSON.parse 会抛
+//   "Bad control character in string literal in JSON"）
+let rawResultAddon = null;
+try {
+  rawResultAddon = require('sherpa-onnx-node/addon.js');
+} catch (_) {
+  rawResultAddon = null;
+}
+
 // 打包后 extract.js 和 asr-process.js 都在 resources/ 根目录
 // 开发时 asr-process.js 在 src/main/engine/，extract.js 在 src/main/keywords/
 const isPackaged = !__dirname.includes('src');
@@ -20,6 +31,19 @@ const { extractKeywords } = require(extractKeywordsPath);
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n');
 }
+
+// 兜底：未捕获错误也要带着 stack 走 stderr，父进程会把 stderr 落到任务日志
+process.on('uncaughtException', (err) => {
+  process.stderr.write(`[uncaughtException] ${err && err.stack ? err.stack : String(err)}\n`);
+  try { send({ type: 'error', message: `未捕获异常: ${err && err.message ? err.message : String(err)}`, stack: err && err.stack }); } catch (_) {}
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  const msg = reason && reason.stack ? reason.stack : String(reason);
+  process.stderr.write(`[unhandledRejection] ${msg}\n`);
+  try { send({ type: 'error', message: `未处理的 Promise 拒绝: ${reason && reason.message ? reason.message : String(reason)}`, stack: reason && reason.stack }); } catch (_) {}
+  process.exit(1);
+});
 
 function formatTimestamp(sec) {
   const h = Math.floor(sec / 3600);
@@ -82,7 +106,54 @@ function recognizeWave(recognizer, samples, sampleRate) {
   const stream = recognizer.createStream();
   stream.acceptWaveform({ sampleRate, samples });
   recognizer.decode(stream);
-  return recognizer.getResult(stream);
+  const result = getResultSafe(recognizer, stream);
+  // 统一净化出口：无论是正常拿到的还是兜底捞回的文本，都过一遍净化
+  if (result && typeof result.text === 'string') {
+    result.text = sanitizeText(result.text);
+  }
+  return result;
+}
+
+/**
+ * 净化识别文本，剥掉模型偶发吐出的非法/脏字符，避免污染数据库与下游序列化。
+ * 字节级 BPE 模型在音频被切碎或内容偏乱时可能退化吐出原始字节 token，
+ * 表现为控制字符、落单的代理对、UTF-8 解码替换符等。
+ * 保留 \t (0x09) 和 \n (0x0A)，它们在正常文本里可能有意义。
+ */
+function sanitizeText(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    // 控制字符：0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F（保留 \t \n）
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    // 落单的高代理（后面没跟低代理）
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')
+    // 落单的低代理（前面没有高代理）
+    .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '')
+    // UTF-8 解码失败的替换符
+    .replace(/\uFFFD/g, '')
+    .trim();
+}
+
+/**
+ * 安全获取识别结果。
+ * 优先走 sherpa 自带的 getResult；若其内部 JSON.parse 因非法控制字符抛错，
+ * 则直接从 native addon 取原始 JSON 串，清洗掉字符串字面量里未转义的
+ * 控制字符（0x00–0x1F，制表/换行除外）后重新解析，避免整段被丢弃。
+ */
+function getResultSafe(recognizer, stream) {
+  try {
+    return recognizer.getResult(stream);
+  } catch (err) {
+    if (!rawResultAddon || typeof rawResultAddon.getOfflineStreamResultAsJson !== 'function') {
+      throw err;
+    }
+    const rawJson = rawResultAddon.getOfflineStreamResultAsJson(stream.handle);
+    // 剥掉所有控制字符 0x00-0x1F：JSON 规范不允许字符串字面量里出现裸的控制字符
+    // （含制表、换行、回车），全部清除后再解析，保住这一段文本而不是整段丢弃。
+    const sanitized = rawJson.replace(/[\u0000-\u001F]/g, '');
+    process.stderr.write(`[getResult-sanitized] rawLen=${rawJson.length} sanitizedLen=${sanitized.length} origErr=${err && err.message ? err.message : String(err)}\n`);
+    return JSON.parse(sanitized);
+  }
 }
 
 // 后处理说话人分离结果
@@ -91,7 +162,7 @@ function postProcessSegments(segments, asrParams = {}) {
 
   const TRIMMED_MIN = asrParams.trimmedMinDuration || 0.5;
   const MERGE_GAP = asrParams.sameSpeakerMergeGap || 2.0;
-  const MAX_DURATION = asrParams.maxSegmentDuration || 30.0;
+  const MAX_DURATION = asrParams.maxSegmentDuration || 60.0;
 
   // 1. 按开始时间排序
   const sorted = segments.slice().sort((a, b) => a.start - b.start);
@@ -201,8 +272,15 @@ function runWithDiarization(args) {
 
     if (segSamples.length < minSampleLength) continue; // 跳过太短的段
 
-    const result = recognizeWave(recognizer, segSamples, wave.sampleRate);
-    const text = String(result.text || '').trim();
+    let text;
+    try {
+      const result = recognizeWave(recognizer, segSamples, wave.sampleRate);
+      text = String(result.text || '').trim();
+    } catch (segErr) {
+      // 单段失败不中断整体；写到 stderr，父进程会落到日志
+      process.stderr.write(`[diarization-seg-error] index=${i} start=${start} end=${end} speaker=${speaker} samples=${segSamples.length} err=${segErr && segErr.stack ? segErr.stack : String(segErr)}\n`);
+      continue;
+    }
     if (!text) continue;
 
     segments.push({ text, start, end, speaker });
@@ -300,8 +378,14 @@ function runWithVAD(args) {
     const duration = samples.length / 16000;
     const end = Math.round((seg.start + duration) * 100) / 100;
 
-    const result = recognizeWave(recognizer, samples, 16000);
-    const text = String(result.text || '').trim();
+    let text;
+    try {
+      const result = recognizeWave(recognizer, samples, 16000);
+      text = String(result.text || '').trim();
+    } catch (segErr) {
+      process.stderr.write(`[vad-seg-error] index=${i} start=${start} end=${end} samples=${samples.length} err=${segErr && segErr.stack ? segErr.stack : String(segErr)}\n`);
+      continue;
+    }
     if (!text) continue;
 
     segments.push({ text, start, end });
@@ -347,21 +431,32 @@ function runPlain(args) {
 let inputData = '';
 process.stdin.on('data', (chunk) => { inputData += chunk; });
 process.stdin.on('end', () => {
+  let stage = 'parse-args';
+  let args;
   try {
-    const args = JSON.parse(inputData);
+    args = JSON.parse(inputData);
 
+    stage = 'select-strategy';
     const hasSegmentation = args.segmentationModelPath && fs.existsSync(args.segmentationModelPath);
     const hasEmbedding = args.embeddingModelPath && fs.existsSync(args.embeddingModelPath);
     const hasVAD = args.vadModelPath && fs.existsSync(args.vadModelPath);
 
+    process.stderr.write(`[strategy-decision] hasSegmentation=${hasSegmentation} hasEmbedding=${hasEmbedding} hasVAD=${hasVAD}\n`);
+
     if (hasSegmentation && hasEmbedding) {
+      stage = 'diarization';
       runWithDiarization(args);
     } else if (hasVAD) {
+      stage = 'vad';
       runWithVAD(args);
     } else {
+      stage = 'plain';
       runPlain(args);
     }
   } catch (err) {
-    send({ type: 'error', message: err.message || '未知错误' });
+    const errMsg = err && err.message ? err.message : '未知错误';
+    const errStack = err && err.stack ? err.stack : '';
+    process.stderr.write(`[fatal-error] stage=${stage} err=${errStack || errMsg}\n`);
+    send({ type: 'error', message: `[${stage}] ${errMsg}`, stack: errStack });
   }
 });

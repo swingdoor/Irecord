@@ -51,7 +51,9 @@ export interface AppSettings {
   llmModel?: string
   llmApiKey?: string
   llmApiKeys?: Record<string, string>
+  llmCustomModels?: Record<string, string[]>
   themeMode?: 'default' | 'monochrome'
+  debugAsrLog?: boolean
   asrParams?: Partial<AsrParams>
   realtimeParams?: Partial<RealtimeRecordingParams>
   realtimeEngineConfig?: Partial<RealtimeEngineConfig>
@@ -62,7 +64,7 @@ export const ASR_DEFAULTS: AsrParams = {
   vadThreshold: 0.5,
   minSilenceDuration: 1.5,
   minSpeechDuration: 1.0,
-  maxSegmentDuration: 30.0,
+  maxSegmentDuration: 60.0,
   maxDurationSeconds: 7200,
   minDurationOn: 1.0,
   minDurationOff: 1.0,
