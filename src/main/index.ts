@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, protocol, globalShortcut, dialog, net } from 'electron'
+import { app, BrowserWindow, Menu, protocol, net } from 'electron'
 import { join } from 'path'
 import { existsSync, statSync, readFileSync, createReadStream } from 'fs'
 import { Readable } from 'stream'
@@ -7,7 +7,6 @@ import { registerIpcHandlers } from './ipc/index'
 import { closeDb, resetStaleTasks } from './db/database'
 import { shutdownQueue, startQueue } from './taskQueue'
 import { getResourcePath } from './utils/paths'
-import { registerRecordingShortcut, unregisterRecordingShortcut } from './shortcuts/globalShortcuts'
 import { cleanupOrphanFiles } from './services/fileManager'
 
 Menu.setApplicationMenu(null)
@@ -143,19 +142,6 @@ app.whenReady().then(async () => {
   // 启动时自动处理残留的 pending 任务
   if (mainWindow) startQueue(mainWindow)
 
-  // 注册全局快捷键
-  if (mainWindow) {
-    const shortcutResult = registerRecordingShortcut(mainWindow)
-    if (!shortcutResult.success) {
-      dialog.showMessageBox(mainWindow, {
-        type: 'warning',
-        title: '快捷键注册失败',
-        message: shortcutResult.error || '全局快捷键注册失败',
-        buttons: ['知道了']
-      })
-    }
-  }
-
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
@@ -167,10 +153,6 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
-})
-
-app.on('will-quit', () => {
-  unregisterRecordingShortcut()
 })
 
 app.on('before-quit', async () => {

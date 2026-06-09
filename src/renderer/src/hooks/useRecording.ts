@@ -11,11 +11,6 @@ export interface RecordingSegment {
 interface RecordingState {
   status: RecordingStatus
   duration: number
-  segments: RecordingSegment[]
-  currentText: string
-  currentSegmentStartTime: number
-  finalText: string
-  finalSegments: Array<{ text: string; startTime: number; endTime: number }>
   filePath: string | null
   error: string | null
 }
@@ -24,11 +19,6 @@ export function useRecording() {
   const [state, setState] = useState<RecordingState>({
     status: 'idle',
     duration: 0,
-    segments: [],
-    currentText: '',
-    currentSegmentStartTime: 0,
-    finalText: '',
-    finalSegments: [],
     filePath: null,
     error: null,
   })
@@ -71,24 +61,13 @@ export function useRecording() {
   useEffect(() => cleanup, [cleanup])
 
   const start = useCallback(async () => {
-    setState(prev => ({ ...prev, status: 'initializing', error: null, segments: [], currentText: '', currentSegmentStartTime: 0, finalText: '', finalSegments: [], filePath: null }))
+    setState(prev => ({ ...prev, status: 'initializing', error: null, filePath: null }))
 
     try {
-      // Get realtime recording settings
-      const settings = await window.electronAPI.getSettings()
-      const engineConfig = settings.realtimeEngineConfig || {}
-      const engine = engineConfig.engine || 'qwen3-simulated-streaming'
+      // 录音采集固定增益（不再依赖已移除的实时引擎设置）
+      const audioGain = 2.0
 
-      // Get audio gain based on selected engine
-      let audioGain = 2.0
-      if (engine === 'qwen3-simulated-streaming') {
-        audioGain = engineConfig.qwen3Params?.audioGain ?? 2.0
-      } else {
-        audioGain = engineConfig.zipformerParams?.audioGain ?? settings.realtimeParams?.audioGain ?? 2.0
-      }
-
-
-      // Start recognizer in main process
+      // Start recorder in main process
       const res = await window.electronAPI.startRecording()
       if (res.error) {
         setState(prev => ({ ...prev, status: 'idle', error: res.error! }))
@@ -144,34 +123,11 @@ export function useRecording() {
       gainNode.connect(workletNode)
       source.connect(analyser)
 
-      // Listen for results from main process
-      const unsubResult = window.electronAPI.onRealtimeResult((data) => {
-        if (data.text && data.text.trim()) {
-          setState(prev => ({
-            ...prev,
-            currentText: data.text,
-            currentSegmentStartTime: data.startTime
-          }))
-        }
-      })
-      const unsubSegment = window.electronAPI.onSegmentComplete((data) => {
-        if (data.text && data.text.trim()) {
-          setState(prev => ({
-            ...prev,
-            segments: [...prev.segments, {
-              text: data.text,
-              startTime: data.startTime,
-              endTime: data.endTime
-            }],
-            currentText: '',
-            currentSegmentStartTime: data.endTime // Next segment starts at current end time
-          }))
-        }
-      })
+      // Listen for errors from main process
       const unsubError = window.electronAPI.onRecordingError((data) => {
         setState(prev => ({ ...prev, error: data.message }))
       })
-      cleanupListenersRef.current = [unsubResult, unsubSegment, unsubError]
+      cleanupListenersRef.current = [unsubError]
 
       // Start timer
       startTimeRef.current = Date.now()
@@ -203,7 +159,7 @@ export function useRecording() {
       }
 
       // Clear current text when pausing
-      setState(prev => ({ ...prev, status: 'paused', currentText: '', currentSegmentStartTime: 0 }))
+      setState(prev => ({ ...prev, status: 'paused' }))
     }
   }, [])
 
@@ -250,8 +206,6 @@ export function useRecording() {
       setState(prev => ({
         ...prev,
         status: 'stopped',
-        finalText: result.text || '',
-        finalSegments: result.segments || [],
         filePath: result.filePath || null,
       }))
       return result
@@ -263,11 +217,6 @@ export function useRecording() {
     setState({
       status: 'idle',
       duration: 0,
-      segments: [],
-      currentText: '',
-      currentSegmentStartTime: 0,
-      finalText: '',
-      finalSegments: [],
       filePath: null,
       error: null,
     })

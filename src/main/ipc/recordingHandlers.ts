@@ -2,16 +2,13 @@ import { ipcMain, dialog, BrowserWindow } from 'electron'
 import { existsSync, statSync } from 'fs'
 import { copyFile } from 'fs/promises'
 import { join } from 'path'
-import { IRealtimeRecognizer } from '../engine/IRealtimeRecognizer'
-import { RealtimeRecognizer, checkStreamingModelExists, getStreamingModelPath } from '../engine/realtime-recognizer'
-import { Qwen3RealtimeRecognizer } from '../engine/qwen3-realtime-recognizer'
-import { getQwen3AsrModelPath, getVadModelPath, checkQwen3AsrModelExists, checkVadModelExists } from '../utils/paths'
-import { getRealtimeEngineConfig, getSettings } from '../utils/settings'
+import { AudioRecorder } from '../audio/AudioRecorder'
+import { processRecording } from '../audio/postProcessing'
+import { getSettings } from '../utils/settings'
 import { createRealtimeRecording, getAllRealtimeRecordings, getRealtimeRecording, deleteRealtimeRecording } from '../db/database'
 import { createTask } from '../db/database'
 import { startQueue } from '../taskQueue'
 import { logError } from '../utils/errorHandler'
-import { canStartRecording, setRecordingState, getRecordingState, closeFloatingRecorder } from '../windows/floatingRecorder'
 import { registerFile, addReference, removeReference } from '../services/fileManager'
 
 function getMainWindow(): BrowserWindow | null {
@@ -51,129 +48,96 @@ function getUniqueFileName(dir: string, baseName: string, ext: string): string {
   return fileName
 }
 
-let realtimeRecognizer: IRealtimeRecognizer | null = null
-let currentModelType: string | null = null
+let audioRecorder: AudioRecorder | null = null
 
 export function registerRecordingHandlers(): void {
-  // 检查流式模型是否可用
-  ipcMain.handle('check-streaming-model', () => {
-    const engineConfig = getRealtimeEngineConfig()
-    if (engineConfig.engine === 'qwen3-simulated-streaming') {
-      return { available: checkQwen3AsrModelExists() && checkVadModelExists() }
-    }
-    return { available: checkStreamingModelExists() }
-  })
-
   // 开始录音
   ipcMain.handle('start-recording', async () => {
     try {
-      // Check if another recording mode is active
-      if (!canStartRecording('fullscreen')) {
+      // 已有录音进行中（audioRecorder 实例即单一事实来源）
+      if (audioRecorder) {
         return { error: '已有录音正在进行中' }
       }
 
-      if (realtimeRecognizer) {
-        realtimeRecognizer.cleanup()
-        realtimeRecognizer = null
-      }
-
-      const engineConfig = getRealtimeEngineConfig()
-
-      if (engineConfig.engine === 'qwen3-simulated-streaming') {
-        const qwen3ModelDir = getQwen3AsrModelPath()
-        const vadModelPath = getVadModelPath()
-
-        if (!checkQwen3AsrModelExists()) {
-          return { error: 'Qwen3-ASR 模型文件不存在，请在设置中配置模型路径' }
-        }
-        if (!checkVadModelExists()) {
-          return { error: 'Silero VAD 模型文件不存在' }
-        }
-
-        realtimeRecognizer = new Qwen3RealtimeRecognizer({
-          qwen3ModelDir,
-          vadModelPath,
-          params: engineConfig.qwen3Params,
-          numThreads: 4
-        })
-        currentModelType = 'qwen3-asr'
-      } else {
-        const modelDir = getStreamingModelPath()
-        realtimeRecognizer = new RealtimeRecognizer({ modelDir })
-        currentModelType = 'zipformer'
-      }
-
-      realtimeRecognizer.initialize()
-      setRecordingState('fullscreen')
+      audioRecorder = new AudioRecorder()
+      audioRecorder.initialize()
       return { success: true }
     } catch (err: any) {
       logError('start-recording', err)
-      realtimeRecognizer?.cleanup()
-      realtimeRecognizer = null
-      setRecordingState('idle')
+      audioRecorder?.cleanup()
+      audioRecorder = null
       return { error: err.message || '启动录音失败' }
     }
   })
 
   // 接收音频块
   ipcMain.on('audio-chunk', (event, buffer: ArrayBuffer) => {
-    if (!realtimeRecognizer) return
+    if (!audioRecorder) return
 
     try {
       const received = new Float32Array(buffer)
       const audioData = new Float32Array(received)
-      const result = realtimeRecognizer.feedAudio(audioData)
-
-      if (result && result.text && result.text.trim()) {
-        if (result.isFinal) {
-          event.sender.send('segment-complete', {
-            text: result.text,
-            startTime: result.startTime,
-            endTime: result.endTime
-          })
-        } else {
-          event.sender.send('realtime-result', {
-            text: result.text,
-            startTime: result.startTime
-          })
-        }
-      }
+      audioRecorder.feedAudio(audioData)
     } catch (err: any) {
       logError('audio-chunk', err)
       event.sender.send('recording-error', { message: err.message })
     }
   })
 
-  // 停止录音
+  // 停止录音：仅 finalize 原始 WAV，后处理由用户在配置阶段主动触发
   ipcMain.handle('stop-recording', async () => {
-    if (!realtimeRecognizer) {
+    if (!audioRecorder) {
       return { error: '没有正在进行的录音' }
     }
 
     try {
-      const result = realtimeRecognizer.finalize()
-      realtimeRecognizer.cleanup()
-      realtimeRecognizer = null
-      setRecordingState('idle')
-
-      const fullText = result.segments.map(s => s.text).join(' ')
-      const duration = result.segments.length > 0
-        ? result.segments[result.segments.length - 1].endTime
-        : 0
-      const wordCount = fullText.length
+      const result = audioRecorder.finalize()
+      audioRecorder.cleanup()
+      audioRecorder = null
 
       return {
-        text: fullText,
-        segments: result.segments,
         filePath: result.filePath,
-        duration,
-        wordCount
+        duration: result.duration,
+        fileSize: result.fileSize
       }
     } catch (err: any) {
       logError('stop-recording', err)
-      realtimeRecognizer?.cleanup()
-      realtimeRecognizer = null
+      audioRecorder?.cleanup()
+      audioRecorder = null
       return { error: err.message || '停止录音失败' }
+    }
+  })
+
+  // 后处理：用户在停止后的配置阶段主动触发
+  ipcMain.handle('process-recording', async (event, params: {
+    filePath: string
+    options: {
+      denoise: boolean
+      trimSilence: boolean
+      normalizeLoudness: boolean
+      compress: boolean
+      compressFormat: 'm4a' | 'mp3'
+      keepOriginal: boolean
+    }
+  }) => {
+    try {
+      const processedResult = await processRecording(params.filePath, params.options, (progress) => {
+        event.sender.send('postprocessing-progress', { progress })
+      })
+      event.sender.send('postprocessing-complete', {
+        filePath: processedResult.outputPath,
+        fileSize: processedResult.fileSize,
+        originalPath: processedResult.originalPath
+      })
+      return {
+        filePath: processedResult.outputPath,
+        fileSize: processedResult.fileSize,
+        originalPath: processedResult.originalPath
+      }
+    } catch (err: any) {
+      logError('process-recording', err)
+      event.sender.send('postprocessing-error', { error: err.message })
+      return { error: err.message || '后处理失败' }
     }
   })
 
@@ -277,10 +241,15 @@ export function registerRecordingHandlers(): void {
       const recording = await getRealtimeRecording(recordingId)
       if (!recording) return { error: '录音记录不存在' }
 
+      // 转写优先使用原始 WAV（无损、采样率原生），回退到成品
+      const transcriptionSource = recording.originalFilePath && existsSync(recording.originalFilePath)
+        ? recording.originalFilePath
+        : recording.filePath
+
       const settings = getSettings()
       const task = await createTask({
         fileName: recording.title,
-        filePath: recording.filePath,
+        filePath: transcriptionSource,
         fileSize: recording.fileSize,
         duration: recording.duration,
         modelType: settings.defaultModel || 'qwen3-asr',
@@ -295,9 +264,9 @@ export function registerRecordingHandlers(): void {
           ownerType: 'task'
         })
       } else {
-        // 兼容旧数据：通过 filePath 注册
+        // 兼容旧数据：通过转写源 filePath 注册
         registerFile({
-          filePath: recording.filePath,
+          filePath: transcriptionSource,
           ownerId: task.id,
           ownerType: 'task'
         })
@@ -323,6 +292,14 @@ export function registerRecordingHandlers(): void {
     text: string
     segments: Array<{ text: string; start: number; end: number }>
     createProofreadingTask: boolean
+    originalFilePath?: string
+    postProcessing?: {
+      denoise: boolean
+      trimSilence: boolean
+      normalizeLoudness: boolean
+      compress: boolean
+      compressFormat?: 'm4a' | 'mp3'
+    }
   }) => {
     try {
       const actualFileSize = existsSync(params.filePath) ? statSync(params.filePath).size : 0
@@ -335,7 +312,8 @@ export function registerRecordingHandlers(): void {
         wordCount: params.wordCount,
         text: params.text,
         segments: params.segments,
-        modelType: currentModelType || undefined
+        originalFilePath: params.originalFilePath,
+        postProcessing: params.postProcessing
       })
 
       // 注册文件到 FileManager
@@ -350,23 +328,36 @@ export function registerRecordingHandlers(): void {
       if (params.createProofreadingTask) {
         await new Promise(resolve => setTimeout(resolve, 500))
 
+        // 转写优先使用原始 WAV
+        const transcriptionSource = params.originalFilePath && existsSync(params.originalFilePath)
+          ? params.originalFilePath
+          : params.filePath
+
         const settings = getSettings()
         const task = await createTask({
           fileName: params.title,
-          filePath: params.filePath,
-          fileSize: actualFileSize,
+          filePath: transcriptionSource,
+          fileSize: existsSync(transcriptionSource) ? statSync(transcriptionSource).size : actualFileSize,
           duration: params.duration,
           modelType: settings.defaultModel || 'qwen3-asr',
           status: 'pending'
         })
         taskId = task.id
 
-        // 为任务添加文件引用
-        addReference({
-          fileId,
-          ownerId: task.id,
-          ownerType: 'task'
-        })
+        // 为任务添加文件引用：转写源与录音成品不同则单独注册
+        if (transcriptionSource === params.filePath) {
+          addReference({
+            fileId,
+            ownerId: task.id,
+            ownerType: 'task'
+          })
+        } else {
+          registerFile({
+            filePath: transcriptionSource,
+            ownerId: task.id,
+            ownerType: 'task'
+          })
+        }
 
         const win = getMainWindow()
         if (win) startQueue(win)
@@ -377,101 +368,6 @@ export function registerRecordingHandlers(): void {
       logError('save-realtime-recording', err)
       return { error: err.message || '保存录音记录失败' }
     }
-  })
-
-  // 浮动录音专用 IPC handlers
-  ipcMain.handle('start-floating-recording', async () => {
-    try {
-      const currentState = getRecordingState()
-
-      // 如果已经在浮动录音中，直接返回成功（防止重复调用）
-      if (currentState === 'floating') {
-        return { success: true }
-      }
-
-      if (!canStartRecording('floating')) {
-        return { error: '已有录音正在进行中' }
-      }
-
-      if (realtimeRecognizer) {
-        realtimeRecognizer.cleanup()
-        realtimeRecognizer = null
-      }
-
-      const engineConfig = getRealtimeEngineConfig()
-
-      if (engineConfig.engine === 'qwen3-simulated-streaming') {
-        const qwen3ModelDir = getQwen3AsrModelPath()
-        const vadModelPath = getVadModelPath()
-
-        if (!checkQwen3AsrModelExists()) {
-          return { error: 'Qwen3-ASR 模型文件不存在，请在设置中配置模型路径' }
-        }
-        if (!checkVadModelExists()) {
-          return { error: 'Silero VAD 模型文件不存在' }
-        }
-
-        realtimeRecognizer = new Qwen3RealtimeRecognizer({
-          qwen3ModelDir,
-          vadModelPath,
-          params: engineConfig.qwen3Params,
-          numThreads: 4
-        })
-        currentModelType = 'qwen3-asr'
-      } else {
-        const modelDir = getStreamingModelPath()
-        realtimeRecognizer = new RealtimeRecognizer({ modelDir })
-        currentModelType = 'zipformer'
-      }
-
-      realtimeRecognizer.initialize()
-      setRecordingState('floating')
-      return { success: true }
-    } catch (err: any) {
-      logError('start-floating-recording', err)
-      realtimeRecognizer?.cleanup()
-      realtimeRecognizer = null
-      setRecordingState('idle')
-      return { error: err.message || '启动录音失败' }
-    }
-  })
-
-  ipcMain.handle('stop-floating-recording', async () => {
-    if (!realtimeRecognizer) {
-      return { error: '没有正在进行的录音' }
-    }
-
-    try {
-      const result = realtimeRecognizer.finalize()
-      realtimeRecognizer.cleanup()
-      realtimeRecognizer = null
-      setRecordingState('saving')
-
-      const fullText = result.segments.map(s => s.text).join(' ')
-      const duration = result.segments.length > 0
-        ? result.segments[result.segments.length - 1].endTime
-        : 0
-      const wordCount = fullText.length
-
-      return {
-        text: fullText,
-        segments: result.segments,
-        filePath: result.filePath,
-        duration,
-        wordCount
-      }
-    } catch (err: any) {
-      logError('stop-floating-recording', err)
-      realtimeRecognizer?.cleanup()
-      realtimeRecognizer = null
-      setRecordingState('idle')
-      return { error: err.message || '停止录音失败' }
-    }
-  })
-
-  // 关闭浮动录音窗口
-  ipcMain.on('close-floating-recorder', () => {
-    closeFloatingRecorder()
   })
 
   // 批量导出录音音频

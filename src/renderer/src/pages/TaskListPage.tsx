@@ -30,7 +30,6 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
   const [availableModels, setAvailableModels] = useState<Array<{ id: string; name: string; available: boolean }>>([])
   const [addErrors, setAddErrors] = useState<string[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [streamingModelAvailable, setStreamingModelAvailable] = useState(false)
   const [createDocModalOpen, setCreateDocModalOpen] = useState(false)
   const [taskProgress, setTaskProgress] = useState<Record<string, { stage: string; percent: number }>>({})
 
@@ -42,12 +41,10 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     Promise.all([
       window.electronAPI.getAvailableModels(),
       window.electronAPI.getSettings(),
-      window.electronAPI.checkStreamingModel(),
-    ]).then(([models, settings, streamingModel]) => {
+    ]).then(([models, settings]) => {
       setAvailableModels(models)
       const defaultModel = settings.defaultModel || models.find(m => m.available)?.id || 'qwen3-asr'
       setSelectedModel(defaultModel)
-      setStreamingModelAvailable(streamingModel.available)
       // Restore active tab from settings
       if (settings.activeTab) setActiveTab(settings.activeTab)
     })
@@ -258,7 +255,6 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
         onUpload={handleAddFiles}
         onRecord={handleRecord}
         onCreateDoc={() => setCreateDocModalOpen(true)}
-        streamingModelAvailable={streamingModelAvailable}
       />
 
       <Tabs activeKey={activeTab} onChange={handleTabChange}>

@@ -1,6 +1,6 @@
 {
   "name": "irecord",
-  "version": "0.8.6",
+  "version": "0.9.0",
   "description": "你说我记 - 本地语音识别转写工具",
   "main": "dist/main/index.js",
   "scripts": {
@@ -45,10 +45,6 @@
       {
         "from": "resources/ffmpeg",
         "to": "resources/ffmpeg"
-      },
-      {
-        "from": "resources/models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30",
-        "to": "resources/models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30"
       },
       {
         "from": "resources/models/silero-vad",

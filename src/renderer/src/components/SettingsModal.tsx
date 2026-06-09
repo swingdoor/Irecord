@@ -103,7 +103,6 @@ function ModelListItem({ model, progress, onDownload, onCancel, onDelete }: {
 export function SettingsModal({ open, onClose, availableModels, onSettingsChange }: SettingsModalProps) {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
-  const [realtimeEngine, setRealtimeEngine] = useState('qwen3-simulated-streaming')
   const [llmProviders, setLlmProviders] = useState<LLMProviderInfo[]>([])
   const [selectedProvider, setSelectedProvider] = useState('dashscope')
   const [providerModels, setProviderModels] = useState<Array<{ id: string; name: string }>>([])
@@ -112,7 +111,6 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
   const [customModels, setCustomModels] = useState<Record<string, string[]>>({})
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [modelRegistry, setModelRegistry] = useState<ModelRegistryEntry[]>([])
-  const [realtimeModels, setRealtimeModels] = useState<ModelRegistryEntry[]>([])
   const [offlineModels, setOfflineModels] = useState<ModelRegistryEntry[]>([])
   const [auxiliaryModels, setAuxiliaryModels] = useState<ModelRegistryEntry[]>([])
   const [engines, setEngines] = useState<Array<{ id: string; name: string; type: string; description: string; models: string[]; available: boolean }>>([])
@@ -123,9 +121,8 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
   const [downloadProgress, setDownloadProgress] = useState<Record<string, { percent: number; downloadedBytes: number; totalBytes: number }>>({})
 
   const refreshModelRegistry = () => {
-    window.electronAPI.getModelRegistry().then(({ models, realtimeModels: rt, offlineModels: ol, auxiliaryModels: aux, downloadPath: dp, ffmpegExists: fe, defaultModelPath: dmp, defaultFfmpegPath: dfp }) => {
+    window.electronAPI.getModelRegistry().then(({ models, offlineModels: ol, auxiliaryModels: aux, downloadPath: dp, ffmpegExists: fe, defaultModelPath: dmp, defaultFfmpegPath: dfp }) => {
       setModelRegistry(models)
-      setRealtimeModels(rt)
       setOfflineModels(ol)
       setAuxiliaryModels(aux)
       setDownloadPath(dp)
@@ -169,9 +166,6 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
         setCustomModels(savedCustom)
 
         const asrParams = settings.asrParams || {}
-        const engineConfig = settings.realtimeEngineConfig || {}
-        const zipformerParams = engineConfig.zipformerParams || settings.realtimeParams || {}
-        const qwen3Params = engineConfig.qwen3Params || {}
 
         form.setFieldsValue({
           defaultModel: settings.defaultModel || availableModels.find(m => m.available)?.id || 'qwen3-asr',
@@ -186,18 +180,7 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
           maxSegmentDuration: asrParams.maxSegmentDuration ?? 60,
           maxDurationSeconds: asrParams.maxDurationSeconds ?? 7200,
           debugAsrLog: settings.debugAsrLog ?? false,
-          realtimeEngine: engineConfig.engine || 'qwen3-simulated-streaming',
-          zipformerAudioGain: zipformerParams.audioGain ?? 2.0,
-          rule1MinTrailingSilence: zipformerParams.rule1MinTrailingSilence ?? 2.4,
-          rule2MinTrailingSilence: zipformerParams.rule2MinTrailingSilence ?? 1.2,
-          rule3MinUtteranceLength: zipformerParams.rule3MinUtteranceLength ?? 20.0,
-          qwen3AudioGain: qwen3Params.audioGain ?? 2.0,
-          qwen3VadThreshold: qwen3Params.vadThreshold ?? 0.5,
-          qwen3VadMinSilenceDuration: qwen3Params.vadMinSilenceDuration ?? 0.5,
-          qwen3VadMaxSpeechDuration: qwen3Params.vadMaxSpeechDuration ?? 30.0,
-          qwen3MaxSegmentDuration: qwen3Params.maxSegmentDuration ?? 30.0,
         })
-        setRealtimeEngine(engineConfig.engine || 'qwen3-simulated-streaming')
       })
     } else {
       setDownloadProgress({})
@@ -334,22 +317,6 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
         minSpeechDuration: values.minSpeechDuration,
         maxSegmentDuration: values.maxSegmentDuration,
         maxDurationSeconds: values.maxDurationSeconds,
-      },
-      realtimeEngineConfig: {
-        engine: values.realtimeEngine,
-        zipformerParams: {
-          audioGain: values.zipformerAudioGain,
-          rule1MinTrailingSilence: values.rule1MinTrailingSilence,
-          rule2MinTrailingSilence: values.rule2MinTrailingSilence,
-          rule3MinUtteranceLength: values.rule3MinUtteranceLength,
-        },
-        qwen3Params: {
-          audioGain: values.qwen3AudioGain,
-          vadThreshold: values.qwen3VadThreshold,
-          vadMinSilenceDuration: values.qwen3VadMinSilenceDuration,
-          vadMaxSpeechDuration: values.qwen3VadMaxSpeechDuration,
-          maxSegmentDuration: values.qwen3MaxSegmentDuration,
-        }
       }
     }
 
@@ -363,15 +330,6 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
       onSettingsChange(settings)
     }
   }
-
-  // Realtime engine options from engine registry
-  const realtimeEngineOptions = engines
-    .filter(e => e.type === 'realtime')
-    .map(e => ({
-      value: e.id,
-      label: e.available ? e.name : `${e.name}（未下载）`,
-      disabled: !e.available,
-    }))
 
   // Offline model options from engine registry
   const offlineModelOptions = engines
@@ -404,19 +362,6 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
             label: '模型管理',
             children: (
               <div style={{ marginTop: 8 }}>
-                <Text strong style={{ fontSize: 13 }}>实时转写模型</Text>
-                <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, marginTop: 8, marginBottom: 16 }}>
-                  {realtimeModels.map(m => (
-                    <ModelListItem
-                      key={`rt-${m.id}`}
-                      model={m}
-                      progress={downloadProgress[m.id]}
-                      onDownload={handleDownload}
-                      onCancel={handleCancel}
-                      onDelete={handleDelete}
-                    />
-                  ))}
-                </div>
                 <Text strong style={{ fontSize: 13 }}>文件转写模型</Text>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, marginTop: 8, marginBottom: 16 }}>
                   {offlineModels.map(m => (
@@ -447,154 +392,6 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                   {downloadPath && `手动下载的模型请放置到：${downloadPath}`}
                 </Text>
               </div>
-            ),
-          },
-          {
-            key: 'realtime',
-            label: '实时录音',
-            children: (
-              <Form form={form} layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 17 }} style={{ marginTop: 16 }}>
-                <style>{`
-                  .ant-form-item { margin-bottom: 12px; }
-                  .input-wrapper {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                  }
-                  .input-wrapper .ant-select,
-                  .input-wrapper .ant-input-number {
-                    flex: 1;
-                  }
-                  .input-wrapper .unit-text {
-                    width: 32px;
-                    text-align: center;
-                    color: rgba(0, 0, 0, 0.65);
-                    font-size: 14px;
-                    flex-shrink: 0;
-                  }
-                  .label-with-tooltip {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 4px;
-                  }
-                  .label-with-tooltip .anticon {
-                    color: #999;
-                    cursor: help;
-                    font-size: 14px;
-                  }
-                `}</style>
-                <Form.Item label="识别模型" name="realtimeEngine">
-                  <Select
-                    onChange={(v) => {
-                      const eng = engines.find(e => e.id === v)
-                      if (eng && !eng.available) {
-                        message.info('该模型未下载，请前往"模型管理"下载后使用')
-                        return
-                      }
-                      setRealtimeEngine(v)
-                    }}
-                    options={realtimeEngineOptions}
-                  />
-                </Form.Item>
-
-                {realtimeEngine === 'qwen3-simulated-streaming' && (
-                  <>
-                    <Form.Item label="音频增益" name="qwen3AudioGain">
-                      <InputNumberWithUnit min={1.0} max={10.0} step={0.5} unit="倍" />
-                    </Form.Item>
-                    <Form.Item
-                      label={
-                        <span className="label-with-tooltip">
-                          VAD 阈值
-                          <Tooltip title="语音活动检测灵敏度，值越低越敏感（默认 0.5）">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </span>
-                      }
-                      name="qwen3VadThreshold"
-                    >
-                      <InputNumberWithUnit min={0.1} max={0.9} step={0.05} />
-                    </Form.Item>
-                    <Form.Item
-                      label={
-                        <span className="label-with-tooltip">
-                          最短静音
-                          <Tooltip title="多长静音后触发分段（默认 0.5）">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </span>
-                      }
-                      name="qwen3VadMinSilenceDuration"
-                    >
-                      <InputNumberWithUnit min={0.1} max={3.0} step={0.1} unit="秒" />
-                    </Form.Item>
-                    <Form.Item
-                      label={
-                        <span className="label-with-tooltip">
-                          最长语音
-                          <Tooltip title="超过此时长强制分段（默认 30）">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </span>
-                      }
-                      name="qwen3VadMaxSpeechDuration"
-                    >
-                      <InputNumberWithUnit min={5} max={120} step={5} unit="秒" />
-                    </Form.Item>
-                  </>
-                )}
-
-                {realtimeEngine === 'streaming-zipformer' && (
-                  <>
-                    <Form.Item label="音频增益" name="zipformerAudioGain">
-                      <InputNumberWithUnit min={1.0} max={10.0} step={0.5} unit="倍" />
-                    </Form.Item>
-                    <Form.Item
-                      label={
-                        <span className="label-with-tooltip">
-                          静音阈值1
-                          <Tooltip title="有标点时，多长静音后结束分段（默认 2.4）">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </span>
-                      }
-                      name="rule1MinTrailingSilence"
-                    >
-                      <InputNumberWithUnit min={0.5} max={5.0} step={0.1} unit="秒" />
-                    </Form.Item>
-                    <Form.Item
-                      label={
-                        <span className="label-with-tooltip">
-                          静音阈值2
-                          <Tooltip title="无标点时，多长静音后结束分段（默认 1.2）">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </span>
-                      }
-                      name="rule2MinTrailingSilence"
-                    >
-                      <InputNumberWithUnit min={0.3} max={3.0} step={0.1} unit="秒" />
-                    </Form.Item>
-                    <Form.Item
-                      label={
-                        <span className="label-with-tooltip">
-                          最长语音
-                          <Tooltip title="超过此时长强制分段（默认 20）">
-                            <QuestionCircleOutlined />
-                          </Tooltip>
-                        </span>
-                      }
-                      name="rule3MinUtteranceLength"
-                    >
-                      <InputNumberWithUnit min={5} max={60} step={5} unit="秒" />
-                    </Form.Item>
-                  </>
-                )}
-
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Qwen3-ASR + VAD 模式准确率更高，但延迟稍大（1-2秒）；Zipformer 流式模式延迟极低但准确率较低。
-                </Text>
-              </Form>
             ),
           },
           {
@@ -844,27 +641,6 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                   </Text>
                 </Form.Item>
               </Form>
-            ),
-          },
-          {
-            key: 'shortcuts',
-            label: '快捷键',
-            children: (
-              <div style={{ marginTop: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f0f0f0' }}>
-                  <div>
-                    <Text strong>开始/停止录音</Text>
-                    <br />
-                    <Text type="secondary" style={{ fontSize: 12 }}>全局快捷键，在任何场景下触发浮动录音窗口</Text>
-                  </div>
-                  <Text code style={{ fontSize: 14 }}>Ctrl + Shift + R</Text>
-                </div>
-                <div style={{ marginTop: 16 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    快捷键为全局快捷键，即使应用在后台也可触发。如果快捷键与其他应用冲突，启动时会提示注册失败。
-                  </Text>
-                </div>
-              </div>
             ),
           },
         ]}

@@ -5,7 +5,7 @@ import { getSettings, invalidateSettingsCache } from '../utils/settings'
 import { getAvailableModels, checkFfmpegExists, checkQwen3AsrModelExists, checkSenseVoiceModelExists, getUserModelsPath, getResourcePath } from '../utils/paths'
 import { getProviderList } from '../llm/providers'
 import { getFullRegistry, downloadModel, cancelDownload, deleteModel } from '../models/downloader'
-import { getEngineAvailability, getRealtimeModels, getOfflineModels, getAuxiliaryModels } from '../models/engines'
+import { getEngineAvailability, getOfflineModels, getAuxiliaryModels } from '../models/engines'
 import { getModelStatus } from '../models/status'
 import { logError } from '../utils/errorHandler'
 
@@ -51,12 +51,10 @@ export function registerSettingsHandlers(): void {
   // 获取模型注册表（含实时状态 + 分组数据）
   ipcMain.handle('get-model-registry', () => {
     const fullModels = getFullRegistry()
-    const realtimeModels = getRealtimeModels().map(m => ({ ...m, ...getModelStatus(m) }))
     const offlineModels = getOfflineModels().map(m => ({ ...m, ...getModelStatus(m) }))
     const auxiliaryModels = getAuxiliaryModels().map(m => ({ ...m, ...getModelStatus(m) }))
     return {
       models: fullModels,
-      realtimeModels,
       offlineModels,
       auxiliaryModels,
       downloadPath: getUserModelsPath(),

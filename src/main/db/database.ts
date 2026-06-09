@@ -48,6 +48,8 @@ export interface RealtimeRecording {
   createdAt: string
   text: string
   segments: string
+  originalFilePath?: string
+  postProcessing?: string
 }
 
 export interface KnowledgeDoc {
@@ -148,6 +150,13 @@ async function getDb(): Promise<SqlJsDatabase> {
 
   // 迁移：为 realtime_recordings 添加 modelType 列
   try { db.run(`ALTER TABLE realtime_recordings ADD COLUMN modelType TEXT`) } catch { /* already exists */ }
+
+  // 迁移：为 realtime_recordings 添加 fileId 列
+  try { db.run(`ALTER TABLE realtime_recordings ADD COLUMN fileId TEXT`) } catch { /* already exists */ }
+
+  // 迁移：为 realtime_recordings 添加 originalFilePath 和 postProcessing 列
+  try { db.run(`ALTER TABLE realtime_recordings ADD COLUMN originalFilePath TEXT`) } catch { /* already exists */ }
+  try { db.run(`ALTER TABLE realtime_recordings ADD COLUMN postProcessing TEXT`) } catch { /* already exists */ }
 
   // 创建 knowledge_docs 表
   db.run(`
@@ -329,6 +338,8 @@ export async function createRealtimeRecording(recording: {
   text: string
   segments: any[]
   modelType?: string
+  originalFilePath?: string
+  postProcessing?: any
 }): Promise<RealtimeRecording> {
   const d = await getDb()
   const rec: RealtimeRecording = {
@@ -342,11 +353,14 @@ export async function createRealtimeRecording(recording: {
     createdAt: new Date().toISOString(),
     text: recording.text,
     segments: JSON.stringify(recording.segments),
+    fileId: null,
+    originalFilePath: recording.originalFilePath,
+    postProcessing: recording.postProcessing ? JSON.stringify(recording.postProcessing) : undefined,
   }
 
   d.run(
-    'INSERT INTO realtime_recordings (id, title, filePath, fileSize, duration, wordCount, modelType, createdAt, text, segments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [rec.id, rec.title, rec.filePath, rec.fileSize, rec.duration, rec.wordCount, rec.modelType, rec.createdAt, rec.text, rec.segments]
+    'INSERT INTO realtime_recordings (id, title, filePath, fileSize, duration, wordCount, modelType, createdAt, text, segments, originalFilePath, postProcessing) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [rec.id, rec.title, rec.filePath, rec.fileSize, rec.duration, rec.wordCount, rec.modelType, rec.createdAt, rec.text, rec.segments, rec.originalFilePath || null, rec.postProcessing || null]
   )
   saveDb()
   return rec

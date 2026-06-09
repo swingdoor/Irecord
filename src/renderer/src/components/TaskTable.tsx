@@ -32,7 +32,6 @@ function getModelLabel(modelType?: string): string {
   switch (modelType) {
     case 'qwen3-asr': return 'Qwen3-ASR'
     case 'sensevoice-small': return 'SenseVoice'
-    case 'streaming-zipformer-zh': return '实时录音'
     default: return modelType || '-'
   }
 }

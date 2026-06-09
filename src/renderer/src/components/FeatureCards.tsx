@@ -7,10 +7,9 @@ interface FeatureCardsProps {
   onUpload: () => void
   onRecord: () => void
   onCreateDoc: () => void
-  streamingModelAvailable: boolean
 }
 
-export function FeatureCards({ onUpload, onRecord, onCreateDoc, streamingModelAvailable }: FeatureCardsProps) {
+export function FeatureCards({ onUpload, onRecord, onCreateDoc }: FeatureCardsProps) {
   return (
     <Row gutter={16}>
       <Col span={8}>
@@ -20,9 +19,9 @@ export function FeatureCards({ onUpload, onRecord, onCreateDoc, streamingModelAv
               <AudioOutlined style={{ fontSize: 24 }} />
               <Text strong>实时录音</Text>
             </Space>
-            <Text type="secondary">实时语音转文字，支持区分说话人</Text>
-            <Button icon={<AudioOutlined />} block disabled={!streamingModelAvailable} onClick={onRecord}>
-              {streamingModelAvailable ? '开始录音' : '需要下载流式模型'}
+            <Text type="secondary">麦克风录音，录音完成后可转文字</Text>
+            <Button icon={<AudioOutlined />} block onClick={onRecord}>
+              开始录音
             </Button>
           </Space>
         </Card>

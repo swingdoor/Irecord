@@ -22,16 +22,6 @@ export const MODEL_REGISTRY: ModelEntry[] = [
     bundled: true,
   },
   {
-    id: 'streaming-zipformer-zh',
-    name: 'Streaming Zipformer',
-    description: '实时录音专用，低延迟流式识别',
-    category: 'asr',
-    folderName: 'sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30',
-    requiredFiles: ['encoder.int8.onnx', 'decoder.onnx', 'joiner.int8.onnx', 'tokens.txt'],
-    size: 167_361_237,
-    bundled: true,
-  },
-  {
     id: 'qwen3-asr',
     name: 'Qwen3-ASR 0.6B',
     description: '高精度离线转写，效果最佳',

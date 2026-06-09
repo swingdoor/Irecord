@@ -184,26 +184,6 @@ export interface ModelInfo {
 }
 
 /**
- * 获取流式识别模型路径
- */
-export function getStreamingZipformerModelPath(): string {
-  const found = findModelDir('sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30')
-  return found?.path ?? join(getModelsPath(), 'sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30')
-}
-
-/**
- * 检查流式识别模型是否存在
- */
-export function checkStreamingZipformerModelExists(): boolean {
-  const modelDir = getStreamingZipformerModelPath()
-  const encoder = join(modelDir, 'encoder.int8.onnx')
-  const decoder = join(modelDir, 'decoder.onnx')
-  const joiner = join(modelDir, 'joiner.int8.onnx')
-  const tokens = join(modelDir, 'tokens.txt')
-  return existsSync(encoder) && existsSync(decoder) && existsSync(joiner) && existsSync(tokens)
-}
-
-/**
  * 获取所有支持的模型及其可用状态
  */
 export function getAvailableModels(): ModelInfo[] {
@@ -219,12 +199,6 @@ export function getAvailableModels(): ModelInfo[] {
       name: 'SenseVoice Small（轻量快速）',
       available: checkSenseVoiceModelExists(),
       modelDir: getSenseVoiceModelPath(),
-    },
-    {
-      id: 'streaming-zipformer-zh',
-      name: 'Streaming Zipformer（实时录音）',
-      available: checkStreamingZipformerModelExists(),
-      modelDir: getStreamingZipformerModelPath(),
     },
   ]
 }

@@ -60,7 +60,7 @@ const electronAPI = {
     ipcRenderer.invoke('get-llm-providers'),
 
   // ===== 模型管理 =====
-  getModelRegistry: (): Promise<{ models: any[]; realtimeModels: any[]; offlineModels: any[]; auxiliaryModels: any[]; downloadPath: string; ffmpegExists: boolean; defaultModelPath: string; defaultFfmpegPath: string }> =>
+  getModelRegistry: (): Promise<{ models: any[]; offlineModels: any[]; auxiliaryModels: any[]; downloadPath: string; ffmpegExists: boolean; defaultModelPath: string; defaultFfmpegPath: string }> =>
     ipcRenderer.invoke('get-model-registry'),
   getEngineRegistry: (): Promise<Array<{ id: string; name: string; type: string; description: string; models: string[]; available: boolean }>> =>
     ipcRenderer.invoke('get-engine-registry'),
@@ -110,35 +110,45 @@ const electronAPI = {
     ipcRenderer.invoke('update-ai-analysis', params),
 
   // ===== 实时录音控制 =====
-  checkStreamingModel: (): Promise<{ available: boolean }> =>
-    ipcRenderer.invoke('check-streaming-model'),
   startRecording: (): Promise<{ success?: boolean; error?: string }> =>
     ipcRenderer.invoke('start-recording'),
   sendAudioChunk: (buffer: ArrayBuffer): void => {
     ipcRenderer.send('audio-chunk', buffer)
   },
   stopRecording: (): Promise<{
-    text?: string
-    segments?: Array<{ text: string; startTime: number; endTime: number }>
     filePath?: string
     duration?: number
-    wordCount?: number
+    fileSize?: number
     error?: string
   }> => ipcRenderer.invoke('stop-recording'),
-  onRealtimeResult: (callback: (data: { text: string; startTime: number }) => void) => {
-    const handler = (_event: any, data: any) => callback(data)
-    ipcRenderer.on('realtime-result', handler)
-    return () => ipcRenderer.removeListener('realtime-result', handler)
-  },
-  onSegmentComplete: (callback: (data: { text: string; startTime: number; endTime: number }) => void) => {
-    const handler = (_event: any, data: any) => callback(data)
-    ipcRenderer.on('segment-complete', handler)
-    return () => ipcRenderer.removeListener('segment-complete', handler)
-  },
+  processRecording: (filePath: string, options: {
+    denoise: boolean
+    trimSilence: boolean
+    normalizeLoudness: boolean
+    compress: boolean
+    compressFormat: 'm4a' | 'mp3'
+    keepOriginal: boolean
+  }): Promise<{ filePath?: string; fileSize?: number; originalPath?: string; error?: string }> =>
+    ipcRenderer.invoke('process-recording', { filePath, options }),
   onRecordingError: (callback: (data: { message: string }) => void) => {
     const handler = (_event: any, data: any) => callback(data)
     ipcRenderer.on('recording-error', handler)
     return () => ipcRenderer.removeListener('recording-error', handler)
+  },
+  onPostprocessingProgress: (callback: (data: { progress: number }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('postprocessing-progress', handler)
+    return () => ipcRenderer.removeListener('postprocessing-progress', handler)
+  },
+  onPostprocessingComplete: (callback: (data: { filePath: string; fileSize: number; originalPath?: string }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('postprocessing-complete', handler)
+    return () => ipcRenderer.removeListener('postprocessing-complete', handler)
+  },
+  onPostprocessingError: (callback: (data: { error: string }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('postprocessing-error', handler)
+    return () => ipcRenderer.removeListener('postprocessing-error', handler)
   },
 
   // ===== 录音记录管理 =====
@@ -170,31 +180,6 @@ const electronAPI = {
     createProofreadingTask: boolean
   }): Promise<{ recordingId?: string; taskId?: string; error?: string }> =>
     ipcRenderer.invoke('save-realtime-recording', params),
-
-  // ===== 浮动录音 =====
-  startFloatingRecording: (): Promise<{ success?: boolean; error?: string }> =>
-    ipcRenderer.invoke('start-floating-recording'),
-  stopFloatingRecording: (): Promise<{
-    text?: string
-    segments?: Array<{ text: string; startTime: number; endTime: number }>
-    filePath?: string
-    duration?: number
-    wordCount?: number
-    error?: string
-  }> => ipcRenderer.invoke('stop-floating-recording'),
-  onShortcutStopRecording: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on('shortcut-stop-recording', handler)
-    return () => ipcRenderer.removeListener('shortcut-stop-recording', handler)
-  },
-  onRequestCloseConfirmation: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on('request-close-confirmation', handler)
-    return () => ipcRenderer.removeListener('request-close-confirmation', handler)
-  },
-  closeFloatingRecorder: (): void => {
-    ipcRenderer.send('close-floating-recorder')
-  },
 
   // ===== 知识整理 =====
   createKnowledgeDoc: (params: {

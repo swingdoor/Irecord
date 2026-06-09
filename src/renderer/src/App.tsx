@@ -6,14 +6,10 @@ import TaskDetailPage from './pages/TaskDetailPage'
 import RecordingPage from './pages/RecordingPage'
 import RealtimeRecordingDetailPage from './pages/RealtimeRecordingDetailPage'
 import KnowledgeDetailPage from './pages/KnowledgeDetailPage'
-import FloatingRecorderPage from './pages/FloatingRecorderPage'
 
 function App() {
   const page = useAppStore((state) => state.page)
   const [themeMode, setThemeMode] = useState<'default' | 'monochrome'>('default')
-
-  // Check if this is the floating recorder window
-  const isFloatingRecorder = window.location.hash.includes('floating-recorder')
 
   useEffect(() => {
     window.electronAPI.getSettings().then(settings => {
@@ -96,17 +92,6 @@ function App() {
   }
 
   const themeConfig = themeMode === 'monochrome' ? monochromeTheme : {}
-
-  // If this is the floating recorder window, render only that page
-  if (isFloatingRecorder) {
-    return (
-      <ConfigProvider theme={themeConfig}>
-        <AntApp style={{ height: '100vh', width: '100vw' }}>
-          <FloatingRecorderPage />
-        </AntApp>
-      </ConfigProvider>
-    )
-  }
 
   return (
     <ConfigProvider theme={themeConfig}>
