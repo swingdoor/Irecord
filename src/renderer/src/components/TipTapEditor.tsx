@@ -136,8 +136,8 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
   const Sep = () => <span style={{ width: 1, height: 20, background: '#d9d9d9', margin: '0 4px', display: 'inline-block' }} />
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid #d9d9d9' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid #d9d9d9', flexShrink: 0 }}>
         <Space size={2} wrap>
           <ToolBtn title="撤销" icon={<UndoOutlined />} action={() => editor.chain().focus().undo().run()} />
           <ToolBtn title="重做" icon={<RedoOutlined />} action={() => editor.chain().focus().redo().run()} />
@@ -162,7 +162,7 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
         {extraActions && <div>{extraActions}</div>}
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         <EditorContent editor={editor} />
       </div>
 

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Typography, Button, Space, Row, Col, Card, Spin, message } from 'antd'
+import { Typography, Button, Space, Card, Spin, message } from 'antd'
 import { ArrowLeftOutlined, CopyOutlined, DownloadOutlined } from '@ant-design/icons'
 import { useAppStore, TaskResultData } from '../stores/appStore'
 import { AudioPlayer, AudioPlayerHandle } from '../components/AudioPlayer'
@@ -47,11 +47,13 @@ export default function TaskDetailPage() {
   }, [currentTaskId])
 
   const handleBack = useCallback(() => {
+    // 录音来源的转写任务返回实时录音 Tab，文件上传返回上传 Tab
+    const backTab = currentTask?.source === 'recording' ? 'realtime' : 'upload'
     setCurrentResult(null)
     setCurrentTask(null)
-    setActiveTab('upload')
+    setActiveTab(backTab)
     setPage('taskList')
-  }, [setPage, setCurrentResult, setCurrentTask, setActiveTab])
+  }, [setPage, setCurrentResult, setCurrentTask, setActiveTab, currentTask])
 
   const handleCopy = useCallback(async () => {
     if (!currentResult) return
@@ -78,7 +80,7 @@ export default function TaskDetailPage() {
 
   if (loading || !currentResult || !currentTask) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
         <Spin size="large" />
       </div>
     )
@@ -89,9 +91,9 @@ export default function TaskDetailPage() {
   const speakerStats = currentResult.speakerStats
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', padding: 24, gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 30px)', padding: 24, gap: 16, overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
         <Space>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack} />
           <div>
@@ -111,13 +113,13 @@ export default function TaskDetailPage() {
       </div>
 
       {/* Body: left-right layout */}
-      <Row gutter={16} style={{ flex: 1, overflow: 'hidden' }}>
-        {/* Left: Audio + Transcript */}
-        <Col span={14} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <Card size="small" style={{ marginBottom: 12 }}>
+      <div style={{ flex: 1, display: 'flex', gap: 16, minHeight: 0, overflow: 'hidden' }}>
+        {/* Left: Audio + Transcript (58%) */}
+        <div style={{ flex: '0 0 58%', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+          <Card size="small" style={{ marginBottom: 12, flexShrink: 0 }}>
             <AudioPlayer ref={playerRef} filePath={currentTask.filePath} onTimeUpdate={setCurrentTime} />
           </Card>
-          <Card size="small" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} styles={{ body: { flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' } }}>
+          <Card size="small" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }} styles={{ body: { flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' } }}>
             <TranscriptPanel
               segments={segments}
               keywords={keywords}
@@ -126,11 +128,11 @@ export default function TaskDetailPage() {
               onSeek={handleSeek}
             />
           </Card>
-        </Col>
+        </div>
 
-        {/* Right: AI Panel */}
-        <Col span={10} style={{ height: '100%' }}>
-          <div style={{ height: '100%', border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, background: '#fff', display: 'flex', flexDirection: 'column' }}>
+        {/* Right: AI Panel (42%) */}
+        <div style={{ flex: '0 0 calc(42% - 8px)', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+          <div style={{ flex: 1, minHeight: 0, border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, background: '#fff', display: 'flex', flexDirection: 'column' }}>
             <AiPanel
               text={currentResult.text}
               segments={segments}
@@ -143,8 +145,8 @@ export default function TaskDetailPage() {
               fileName={currentTask.fileName}
             />
           </div>
-        </Col>
-      </Row>
+        </div>
+      </div>
     </div>
   )
 }

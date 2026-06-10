@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Table, Input, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Segmented, Modal, Progress, message } from 'antd'
+import { Table, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Modal, Progress, message } from 'antd'
 import {
-  SearchOutlined, EllipsisOutlined, LoadingOutlined, PlayCircleOutlined,
+  EllipsisOutlined, LoadingOutlined, PlayCircleOutlined,
   CloseOutlined, DownloadOutlined, DeleteOutlined,
-  UnorderedListOutlined, AppstoreOutlined, AudioOutlined, ExperimentOutlined,
+  AudioOutlined, ExperimentOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { Task } from '../stores/appStore'
@@ -115,6 +115,9 @@ interface TaskTableProps {
   processingStartTime: number
   taskProgress: Record<string, { stage: string; percent: number }>
   themeMode: 'default' | 'monochrome'
+  viewMode: 'table' | 'card'
+  selectedRowKeys: string[]
+  onSelectedRowKeysChange: (keys: string[]) => void
   onViewDetail: (task: Task) => void
   onDelete: (e: React.MouseEvent, id: string) => void
   onRestart: (e: React.MouseEvent, id: string) => void
@@ -123,10 +126,7 @@ interface TaskTableProps {
   onDeepAnalysis?: (e: React.MouseEvent, taskId: string) => void
 }
 
-export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode, onViewDetail, onDelete, onRestart, onCancel, onExportAudio, onDeepAnalysis }: TaskTableProps) {
-  const [search, setSearch] = useState('')
-  const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
-  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
+export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode, viewMode, selectedRowKeys, onSelectedRowKeysChange, onViewDetail, onDelete, onRestart, onCancel, onExportAudio, onDeepAnalysis }: TaskTableProps) {
   const [loading, setLoading] = useState(false)
 
   const handleExport = useCallback(async (taskId: string) => {
@@ -142,82 +142,6 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
       label: '转写',
     })
   }, [])
-
-  const handleBatchDelete = useCallback(() => {
-    if (selectedRowKeys.length === 0) return
-
-    const selectedTasks = tasks.filter(t => selectedRowKeys.includes(t.id))
-    const processingTasks = selectedTasks.filter(t => t.status === 'processing')
-
-    const title = processingTasks.length > 0
-      ? `将取消 ${processingTasks.length} 个正在处理的任务，并删除所有 ${selectedRowKeys.length} 个任务`
-      : `确定删除选中的 ${selectedRowKeys.length} 个任务？`
-
-    Modal.confirm({
-      title,
-      content: '删除后无法恢复',
-      okText: '删除',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: async () => {
-        setLoading(true)
-
-        // 先取消 processing 任务
-        for (const task of processingTasks) {
-          await window.electronAPI.cancelTask(task.id)
-        }
-
-        // 再批量删除
-        for (const id of selectedRowKeys) {
-          await window.electronAPI.deleteTask(id)
-        }
-
-        setLoading(false)
-        setSelectedRowKeys([])
-        message.success(`已删除 ${selectedRowKeys.length} 个任务`)
-        window.location.reload()
-      }
-    })
-  }, [selectedRowKeys, tasks])
-
-  const handleBatchExportTxt = useCallback(async () => {
-    if (selectedRowKeys.length === 0) return
-
-    const selectedTasks = tasks.filter(t => selectedRowKeys.includes(t.id))
-    const exportableTasks = selectedTasks.filter(t => t.status === 'completed')
-
-    if (exportableTasks.length === 0) {
-      message.warning('选中的任务中没有已完成的任务')
-      return
-    }
-
-    if (exportableTasks.length < selectedTasks.length) {
-      message.info(`将导出 ${exportableTasks.length} 个文件（跳过 ${selectedTasks.length - exportableTasks.length} 个未完成的任务）`)
-    }
-
-    setLoading(true)
-    const result = await window.electronAPI.batchExportTaskTxt(exportableTasks.map(t => t.id))
-    setLoading(false)
-
-    if (result.error) {
-      message.error(result.error)
-      return
-    }
-
-    if (result.canceled) return
-
-    if (result.failed === 0) {
-      message.success(`已导出 ${result.success} 个文件到 ${result.targetDir}`)
-    } else {
-      message.warning(`已导出 ${result.success} 个文件，${result.failed} 个失败`)
-    }
-
-    setSelectedRowKeys([])
-  }, [selectedRowKeys, tasks])
-
-  const filtered = search
-    ? tasks.filter(t => t.fileName.toLowerCase().includes(search.toLowerCase()))
-    : tasks
 
   const getMenuItems = (task: Task): MenuProps['items'] => {
     const items: MenuProps['items'] = []
@@ -266,7 +190,7 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
       title: '文件名称',
       dataIndex: 'fileName',
       key: 'fileName',
-      width: '25%',
+      width: '30%',
       ellipsis: true,
       render: (_: string, task: Task) => (
         <div>
@@ -280,10 +204,10 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
     { title: '时长', dataIndex: 'duration', key: 'duration', width: '8%', render: (d: number) => formatDuration(d) },
     { title: '字数', dataIndex: 'wordCount', key: 'wordCount', width: '8%', render: (w: number | null) => w != null ? w.toLocaleString() : '-' },
     { title: '耗时', dataIndex: 'processingTime', key: 'processingTime', width: '8%', render: (t: number | null, record: Task) => record.status === 'processing' ? <ProcessingTimer startTime={processingStartTime} /> : t != null ? formatDuration(t) : '-' },
-    { title: '模型', dataIndex: 'modelType', key: 'modelType', width: '12%', render: (m: string) => getModelLabel(m) },
-    { title: '日期', dataIndex: 'createdAt', key: 'createdAt', width: '17%', render: (d: string) => formatDate(d) },
+    { title: '模型', dataIndex: 'modelType', key: 'modelType', width: '10%', render: (m: string) => getModelLabel(m) },
+    { title: '日期', dataIndex: 'createdAt', key: 'createdAt', width: '15%', render: (d: string) => formatDate(d) },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: '20%',
+      title: '状态', dataIndex: 'status', key: 'status', width: '12%',
       render: (status: string, record: Task) => (
         <Space size={4}>
           <StatusTag status={status} themeMode={themeMode} progress={taskProgress[record.id]} />
@@ -300,7 +224,7 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
       ),
     },
     {
-      title: '操作', key: 'actions', width: '10%',
+      title: '操作', key: 'actions', width: '9%',
       render: (_: any, task: Task) => (
         <Dropdown menu={{ items: getMenuItems(task), onClick: (e) => handleMenuClick(task, e.key, e) }} trigger={['click']}>
           <Button type="text" size="small" icon={<EllipsisOutlined />} onClick={e => e.stopPropagation()} />
@@ -327,52 +251,23 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Space>
-          <Input
-            placeholder="搜索文件..."
-            prefix={<SearchOutlined />}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            allowClear
-            style={{ width: 240 }}
-          />
-          <Segmented
-            value={viewMode}
-            onChange={v => setViewMode(v as 'table' | 'card')}
-            options={[
-              { value: 'table', icon: <UnorderedListOutlined /> },
-              { value: 'card', icon: <AppstoreOutlined /> },
-            ]}
-          />
-        </Space>
-        {selectedRowKeys.length > 0 && (
-          <Space>
-            <Button danger onClick={handleBatchDelete}>
-              删除选中 ({selectedRowKeys.length})
-            </Button>
-            <Button onClick={handleBatchExportTxt}>
-              批量导出 TXT
-            </Button>
-          </Space>
-        )}
-      </div>
-
-      {filtered.length === 0 ? (
-        <Empty description={search ? '没有匹配的文件' : '暂无任务，上传音视频文件开始'} style={{ padding: '48px 0' }} />
-      ) : viewMode === 'table' ? (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+        {tasks.length === 0 ? (
+          <Empty description="暂无任务，上传音视频文件开始" style={{ padding: '48px 0' }} />
+        ) : viewMode === 'table' ? (
         <Table
-          dataSource={filtered}
+          dataSource={tasks}
           columns={columns}
           rowKey="id"
           loading={loading}
           size="small"
-          pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
-          locale={{ emptyText: search ? '没有匹配的文件' : '暂无任务，上传音视频文件开始' }}
+          sticky
+          pagination={false}
+          locale={{ emptyText: '暂无任务，上传音视频文件开始' }}
           rowSelection={{
             selectedRowKeys,
-            onChange: (keys) => setSelectedRowKeys(keys as string[])
+            onChange: (keys) => onSelectedRowKeysChange(keys as string[])
           }}
           onRow={(task) => ({
             onClick: () => (task.status === 'completed' || task.status === 'pending_analysis') && onViewDetail(task),
@@ -381,7 +276,7 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
         />
       ) : (
         <Row gutter={[16, 16]}>
-          {filtered.map(task => (
+          {tasks.map(task => (
             <Col span={8} key={task.id}>
               <Card
                 hoverable={task.status === 'completed' || task.status === 'pending_analysis'}
@@ -389,10 +284,10 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
                 style={{
                   border: `1px solid ${statusBorderColor[task.status] || '#d9d9d9'}`,
                 }}
-                styles={{ body: { padding: '16px 20px' } }}
+                styles={{ body: { padding: '10px 14px' } }}
               >
                 {/* Header: title + status + menu */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Text strong ellipsis style={{ fontSize: 14, flex: 1, minWidth: 0 }}>{task.fileName}</Text>
                     <StatusTag status={task.status} themeMode={themeMode} progress={taskProgress[task.id]} />
@@ -412,7 +307,7 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
                 </div>
 
                 {/* Date */}
-                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>{formatShortDate(task.createdAt)}</Text>
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>{formatShortDate(task.createdAt)}</Text>
 
                 {/* Info: 2-column grid */}
                 <Row gutter={[8, 6]}>
@@ -444,6 +339,18 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
             </Col>
           ))}
         </Row>
+      )}
+      </div>
+
+      {themeMode === 'monochrome' && (
+        <style>{`
+          .ant-table-tbody > tr.ant-table-row-selected > td {
+            background: #fafafa !important;
+          }
+          .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+            background: #f5f5f5 !important;
+          }
+        `}</style>
       )}
     </div>
   )

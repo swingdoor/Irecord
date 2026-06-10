@@ -3,9 +3,8 @@ import { existsSync, statSync } from 'fs'
 import { copyFile } from 'fs/promises'
 import { join } from 'path'
 import { AudioRecorder } from '../audio/AudioRecorder'
-import { processRecording } from '../audio/postProcessing'
 import { getSettings } from '../utils/settings'
-import { createRealtimeRecording, getAllRealtimeRecordings, getRealtimeRecording, deleteRealtimeRecording } from '../db/database'
+import { createRealtimeRecording, getAllRealtimeRecordings, getRealtimeRecording, deleteRealtimeRecording, getRecordingTranscriptionTask } from '../db/database'
 import { createTask } from '../db/database'
 import { startQueue } from '../taskQueue'
 import { logError } from '../utils/errorHandler'
@@ -25,13 +24,6 @@ function getMainWindow(): BrowserWindow | null {
     if (!win.isDestroyed()) return win
   }
   return null
-}
-
-function formatTimestamp(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
 function getUniqueFileName(dir: string, baseName: string, ext: string): string {
@@ -108,39 +100,6 @@ export function registerRecordingHandlers(): void {
     }
   })
 
-  // 后处理：用户在停止后的配置阶段主动触发
-  ipcMain.handle('process-recording', async (event, params: {
-    filePath: string
-    options: {
-      denoise: boolean
-      trimSilence: boolean
-      normalizeLoudness: boolean
-      compress: boolean
-      compressFormat: 'm4a' | 'mp3'
-      keepOriginal: boolean
-    }
-  }) => {
-    try {
-      const processedResult = await processRecording(params.filePath, params.options, (progress) => {
-        event.sender.send('postprocessing-progress', { progress })
-      })
-      event.sender.send('postprocessing-complete', {
-        filePath: processedResult.outputPath,
-        fileSize: processedResult.fileSize,
-        originalPath: processedResult.originalPath
-      })
-      return {
-        filePath: processedResult.outputPath,
-        fileSize: processedResult.fileSize,
-        originalPath: processedResult.originalPath
-      }
-    } catch (err: any) {
-      logError('process-recording', err)
-      event.sender.send('postprocessing-error', { error: err.message })
-      return { error: err.message || '后处理失败' }
-    }
-  })
-
   // 获取所有录音记录
   ipcMain.handle('get-realtime-recordings', async () => {
     try {
@@ -199,52 +158,15 @@ export function registerRecordingHandlers(): void {
     }
   })
 
-  // 导出录音文本
-  ipcMain.handle('export-realtime-recording-txt', async (_event, params: {
-    text: string
-    includeTimestamps: boolean
-    segments?: Array<{ text: string; start: number; end: number }>
-    title?: string
-  }) => {
-    try {
-      const defaultPath = params.title
-        ? `${params.title}_转写.txt`
-        : `录音_${new Date().toLocaleString('zh-CN', { hour12: false }).replace(/[/:\\s]/g, '-')}.txt`
-
-      const result = await dialog.showSaveDialog({
-        title: '导出文本',
-        defaultPath,
-        filters: [{ name: '文本文件', extensions: ['txt'] }]
-      })
-
-      if (result.canceled || !result.filePath) return { canceled: true }
-
-      let content = ''
-      if (params.includeTimestamps && params.segments) {
-        content = params.segments.map(s => `${formatTimestamp(s.start)} - ${s.text}`).join('\n')
-      } else {
-        content = params.text
-      }
-
-      const { writeFile } = await import('fs/promises')
-      await writeFile(result.filePath, content, 'utf-8')
-      return { filePath: result.filePath }
-    } catch (err: any) {
-      logError('export-realtime-recording-txt', err)
-      return { error: `导出失败: ${err.message}` }
-    }
-  })
-
-  // 创建精准校对任务
-  ipcMain.handle('create-proofreading-task', async (_event, recordingId: string) => {
+  // 为录音创建语音转写任务（统一流水线：source='recording'）
+  ipcMain.handle('create-recording-transcription', async (_event, recordingId: string) => {
     try {
       const recording = await getRealtimeRecording(recordingId)
       if (!recording) return { error: '录音记录不存在' }
 
-      // 转写优先使用原始 WAV（无损、采样率原生），回退到成品
-      const transcriptionSource = recording.originalFilePath && existsSync(recording.originalFilePath)
-        ? recording.originalFilePath
-        : recording.filePath
+      // 后处理移除后录音文件唯一，转写直接用 filePath
+      const transcriptionSource = recording.filePath
+      if (!existsSync(transcriptionSource)) return { error: '录音文件不存在' }
 
       const settings = getSettings()
       const task = await createTask({
@@ -253,23 +175,17 @@ export function registerRecordingHandlers(): void {
         fileSize: recording.fileSize,
         duration: recording.duration,
         modelType: settings.defaultModel || 'qwen3-asr',
-        status: 'pending'
+        status: 'pending',
+        source: 'recording',
+        sourceId: recording.id,
       })
 
-      // 为任务添加文件引用（复用录音的文件）
+      // 为任务添加文件引用（复用录音的文件，不复制）
       if (recording.fileId) {
-        addReference({
-          fileId: recording.fileId,
-          ownerId: task.id,
-          ownerType: 'task'
-        })
+        addReference({ fileId: recording.fileId, ownerId: task.id, ownerType: 'task' })
       } else {
-        // 兼容旧数据：通过转写源 filePath 注册
-        registerFile({
-          filePath: transcriptionSource,
-          ownerId: task.id,
-          ownerType: 'task'
-        })
+        // 兼容旧数据：通过 filePath 注册
+        registerFile({ filePath: transcriptionSource, ownerId: task.id, ownerType: 'task' })
       }
 
       const win = getMainWindow()
@@ -277,29 +193,30 @@ export function registerRecordingHandlers(): void {
 
       return { taskId: task.id }
     } catch (err: any) {
-      logError('create-proofreading-task', err)
-      return { error: err.message || '创建精准校对任务失败' }
+      logError('create-recording-transcription', err)
+      return { error: err.message || '创建语音转写任务失败' }
     }
   })
 
-  // 保存录音记录
+  // 查询录音的转写状态（从关联 task 派生）
+  ipcMain.handle('get-recording-transcription-status', async (_event, recordingId: string) => {
+    try {
+      const task = await getRecordingTranscriptionTask(recordingId)
+      if (!task) return { status: 'none' as const }
+      return { status: task.status, taskId: task.id }
+    } catch (err: any) {
+      logError('get-recording-transcription-status', err)
+      return { status: 'none' as const, error: err.message }
+    }
+  })
+
+  // 保存录音记录（纯音频；可选创建语音转写）
   ipcMain.handle('save-realtime-recording', async (_event, params: {
     title: string
     filePath: string
     fileSize: number
     duration: number
-    wordCount: number
-    text: string
-    segments: Array<{ text: string; start: number; end: number }>
-    createProofreadingTask: boolean
-    originalFilePath?: string
-    postProcessing?: {
-      denoise: boolean
-      trimSilence: boolean
-      normalizeLoudness: boolean
-      compress: boolean
-      compressFormat?: 'm4a' | 'mp3'
-    }
+    createTranscription: boolean
   }) => {
     try {
       const actualFileSize = existsSync(params.filePath) ? statSync(params.filePath).size : 0
@@ -309,11 +226,6 @@ export function registerRecordingHandlers(): void {
         filePath: params.filePath,
         fileSize: actualFileSize,
         duration: params.duration,
-        wordCount: params.wordCount,
-        text: params.text,
-        segments: params.segments,
-        originalFilePath: params.originalFilePath,
-        postProcessing: params.postProcessing
       })
 
       // 注册文件到 FileManager
@@ -325,39 +237,22 @@ export function registerRecordingHandlers(): void {
 
       let taskId: string | undefined
 
-      if (params.createProofreadingTask) {
-        await new Promise(resolve => setTimeout(resolve, 500))
-
-        // 转写优先使用原始 WAV
-        const transcriptionSource = params.originalFilePath && existsSync(params.originalFilePath)
-          ? params.originalFilePath
-          : params.filePath
-
+      if (params.createTranscription) {
         const settings = getSettings()
         const task = await createTask({
           fileName: params.title,
-          filePath: transcriptionSource,
-          fileSize: existsSync(transcriptionSource) ? statSync(transcriptionSource).size : actualFileSize,
+          filePath: params.filePath,
+          fileSize: actualFileSize,
           duration: params.duration,
           modelType: settings.defaultModel || 'qwen3-asr',
-          status: 'pending'
+          status: 'pending',
+          source: 'recording',
+          sourceId: recording.id,
         })
         taskId = task.id
 
-        // 为任务添加文件引用：转写源与录音成品不同则单独注册
-        if (transcriptionSource === params.filePath) {
-          addReference({
-            fileId,
-            ownerId: task.id,
-            ownerType: 'task'
-          })
-        } else {
-          registerFile({
-            filePath: transcriptionSource,
-            ownerId: task.id,
-            ownerType: 'task'
-          })
-        }
+        // 复用录音文件引用
+        addReference({ fileId, ownerId: task.id, ownerType: 'task' })
 
         const win = getMainWindow()
         if (win) startQueue(win)

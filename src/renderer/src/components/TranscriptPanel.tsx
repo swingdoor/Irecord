@@ -78,8 +78,8 @@ export function TranscriptPanel({ segments, keywords, currentTime, onSeek }: Tra
     : segments
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ marginBottom: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <div style={{ marginBottom: 12, flexShrink: 0 }}>
         <Input
           placeholder="搜索转写内容..."
           prefix={<SearchOutlined />}
@@ -90,7 +90,7 @@ export function TranscriptPanel({ segments, keywords, currentTime, onSeek }: Tra
       </div>
 
       {keywords.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
+        <div style={{ marginBottom: 12, flexShrink: 0 }}>
           <Space size={[4, 8]} wrap>
             <Text type="secondary" style={{ fontSize: 12 }}>关键词</Text>
             {keywords.map(kw => (
@@ -107,7 +107,7 @@ export function TranscriptPanel({ segments, keywords, currentTime, onSeek }: Tra
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {filtered.map((seg, index) => {
           const isActive = !search && index === activeIndex
           const realIndex = search ? segments.indexOf(seg) : index

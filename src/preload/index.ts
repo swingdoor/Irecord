@@ -121,34 +121,10 @@ const electronAPI = {
     fileSize?: number
     error?: string
   }> => ipcRenderer.invoke('stop-recording'),
-  processRecording: (filePath: string, options: {
-    denoise: boolean
-    trimSilence: boolean
-    normalizeLoudness: boolean
-    compress: boolean
-    compressFormat: 'm4a' | 'mp3'
-    keepOriginal: boolean
-  }): Promise<{ filePath?: string; fileSize?: number; originalPath?: string; error?: string }> =>
-    ipcRenderer.invoke('process-recording', { filePath, options }),
   onRecordingError: (callback: (data: { message: string }) => void) => {
     const handler = (_event: any, data: any) => callback(data)
     ipcRenderer.on('recording-error', handler)
     return () => ipcRenderer.removeListener('recording-error', handler)
-  },
-  onPostprocessingProgress: (callback: (data: { progress: number }) => void) => {
-    const handler = (_event: any, data: any) => callback(data)
-    ipcRenderer.on('postprocessing-progress', handler)
-    return () => ipcRenderer.removeListener('postprocessing-progress', handler)
-  },
-  onPostprocessingComplete: (callback: (data: { filePath: string; fileSize: number; originalPath?: string }) => void) => {
-    const handler = (_event: any, data: any) => callback(data)
-    ipcRenderer.on('postprocessing-complete', handler)
-    return () => ipcRenderer.removeListener('postprocessing-complete', handler)
-  },
-  onPostprocessingError: (callback: (data: { error: string }) => void) => {
-    const handler = (_event: any, data: any) => callback(data)
-    ipcRenderer.on('postprocessing-error', handler)
-    return () => ipcRenderer.removeListener('postprocessing-error', handler)
   },
 
   // ===== 录音记录管理 =====
@@ -160,24 +136,16 @@ const electronAPI = {
     ipcRenderer.invoke('delete-realtime-recording', id),
   exportRealtimeRecordingWav: (filePath: string): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('export-realtime-recording-wav', filePath),
-  exportRealtimeRecordingTxt: (params: {
-    text: string
-    includeTimestamps: boolean
-    segments?: Array<{ text: string; start: number; end: number }>
-    title?: string
-  }): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
-    ipcRenderer.invoke('export-realtime-recording-txt', params),
-  createProofreadingTask: (recordingId: string): Promise<{ taskId?: string; error?: string }> =>
-    ipcRenderer.invoke('create-proofreading-task', recordingId),
+  createRecordingTranscription: (recordingId: string): Promise<{ taskId?: string; error?: string }> =>
+    ipcRenderer.invoke('create-recording-transcription', recordingId),
+  getRecordingTranscriptionStatus: (recordingId: string): Promise<{ status: 'none' | 'pending' | 'processing' | 'completed' | 'failed' | 'stopped' | 'pending_analysis' | 'recording'; taskId?: string; error?: string }> =>
+    ipcRenderer.invoke('get-recording-transcription-status', recordingId),
   saveRealtimeRecording: (params: {
     title: string
     filePath: string
     fileSize: number
     duration: number
-    wordCount: number
-    text: string
-    segments: Array<{ text: string; start: number; end: number }>
-    createProofreadingTask: boolean
+    createTranscription: boolean
   }): Promise<{ recordingId?: string; taskId?: string; error?: string }> =>
     ipcRenderer.invoke('save-realtime-recording', params),
 

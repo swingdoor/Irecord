@@ -1,5 +1,5 @@
 import { Card, Button, Row, Col, Typography, Space } from 'antd'
-import { AudioOutlined, UploadOutlined, FileTextOutlined } from '@ant-design/icons'
+import { AudioOutlined, UploadOutlined, FileTextOutlined, SettingOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
 
@@ -7,9 +7,10 @@ interface FeatureCardsProps {
   onUpload: () => void
   onRecord: () => void
   onCreateDoc: () => void
+  onManageTemplates: () => void
 }
 
-export function FeatureCards({ onUpload, onRecord, onCreateDoc }: FeatureCardsProps) {
+export function FeatureCards({ onUpload, onRecord, onCreateDoc, onManageTemplates }: FeatureCardsProps) {
   return (
     <Row gutter={16}>
       <Col span={8}>
@@ -39,7 +40,16 @@ export function FeatureCards({ onUpload, onRecord, onCreateDoc }: FeatureCardsPr
         </Card>
       </Col>
       <Col span={8}>
-        <Card style={{ height: '100%' }}>
+        <Card style={{ height: '100%', position: 'relative' }}>
+          <Button
+            type="text"
+            size="small"
+            icon={<SettingOutlined />}
+            onClick={onManageTemplates}
+            style={{ position: 'absolute', top: 12, right: 12 }}
+          >
+            管理模板
+          </Button>
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Space>
               <FileTextOutlined style={{ fontSize: 24 }} />

@@ -96,17 +96,21 @@ function App() {
   return (
     <ConfigProvider theme={themeConfig}>
       <AntApp>
-        <div style={{
-          height: 30,
-          WebkitAppRegion: 'drag',
-          backgroundColor: '#ffffff',
-          flexShrink: 0
-        } as any} />
-        {page === 'taskList' && <TaskListPage themeMode={themeMode} onThemeChange={setThemeMode} />}
-        {page === 'taskDetail' && <TaskDetailPage />}
-        {page === 'recording' && <RecordingPage />}
-        {page === 'realtimeRecordingDetail' && <RealtimeRecordingDetailPage />}
-        {page === 'knowledgeDetail' && <KnowledgeDetailPage />}
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div style={{
+            height: 30,
+            WebkitAppRegion: 'drag',
+            backgroundColor: '#ffffff',
+            flexShrink: 0
+          } as any} />
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {page === 'taskList' && <TaskListPage themeMode={themeMode} onThemeChange={setThemeMode} />}
+            {page === 'taskDetail' && <TaskDetailPage />}
+            {page === 'recording' && <RecordingPage />}
+            {page === 'realtimeRecordingDetail' && <RealtimeRecordingDetailPage />}
+            {page === 'knowledgeDetail' && <KnowledgeDetailPage />}
+          </div>
+        </div>
       </AntApp>
     </ConfigProvider>
   )

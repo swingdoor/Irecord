@@ -147,7 +147,7 @@ export default function KnowledgeDetailPage() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
         <Spin size="large" />
       </div>
     )
@@ -171,8 +171,8 @@ export default function KnowledgeDetailPage() {
   )
 
   return (
-    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 30px)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexShrink: 0 }}>
         <Space>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => setPage('taskList')} />
           <div>

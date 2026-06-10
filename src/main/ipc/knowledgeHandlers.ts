@@ -19,6 +19,7 @@ import {
   getTask,
   getResult,
   getRealtimeRecording,
+  getRecordingTranscriptionTask,
 } from '../db/database'
 import { logError } from '../utils/errorHandler'
 
@@ -59,7 +60,12 @@ export function registerKnowledgeHandlers(): void {
           }
         } else if (src.type === 'realtime') {
           const rec = await getRealtimeRecording(src.id)
-          if (rec?.text) texts.push(rec.text)
+          // 录音的转写文本不再存在录音记录上，而在其关联转写任务的 results 中
+          const transTask = await getRecordingTranscriptionTask(src.id)
+          if (transTask) {
+            const result = await getResult(transTask.id)
+            if (result?.text) texts.push(result.text)
+          }
           if (!firstSourceName && rec?.title) {
             firstSourceName = rec.title
           }

@@ -19,15 +19,6 @@ export interface AsrParams {
   qwen3MaxNewTokens: number
 }
 
-export interface RecordingPostProcessing {
-  denoise: boolean
-  trimSilence: boolean
-  normalizeLoudness: boolean
-  compress: boolean
-  compressFormat: 'm4a' | 'mp3'
-  keepOriginal: boolean
-}
-
 export interface AppSettings {
   defaultModel?: string
   defaultStrategy?: string
@@ -41,7 +32,6 @@ export interface AppSettings {
   themeMode?: 'default' | 'monochrome'
   debugAsrLog?: boolean
   asrParams?: Partial<AsrParams>
-  recordingPostProcessing?: Partial<RecordingPostProcessing>
 }
 
 export const ASR_DEFAULTS: AsrParams = {
@@ -59,15 +49,6 @@ export const ASR_DEFAULTS: AsrParams = {
   minSampleLength: 1600,
   qwen3MaxTotalLen: 4096,
   qwen3MaxNewTokens: 1024,
-}
-
-export const POSTPROCESSING_DEFAULTS: RecordingPostProcessing = {
-  denoise: false,
-  trimSilence: false,
-  normalizeLoudness: false,
-  compress: false,  // 暂时禁用默认压缩
-  compressFormat: 'm4a',
-  keepOriginal: false,
 }
 
 let settingsCache: AppSettings | null = null
@@ -98,14 +79,6 @@ export function getAsrParams(): AsrParams {
   return {
     ...ASR_DEFAULTS,
     ...(settings.asrParams || {}),
-  }
-}
-
-export function getRecordingPostProcessing(): RecordingPostProcessing {
-  const settings = getSettings()
-  return {
-    ...POSTPROCESSING_DEFAULTS,
-    ...(settings.recordingPostProcessing || {}),
   }
 }
 

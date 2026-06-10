@@ -1,12 +1,11 @@
 import { useState, useCallback } from 'react'
-import { Table, Input, Space, Segmented, Button, Dropdown, Empty, Card, Row, Col, Typography, Tag, Tooltip, App } from 'antd'
+import { Table, Space, Button, Dropdown, Empty, Card, Row, Col, Typography, Tag, Tooltip, App } from 'antd'
 import {
-  SearchOutlined, UnorderedListOutlined, AppstoreOutlined, EllipsisOutlined,
-  DownloadOutlined, DeleteOutlined, SettingOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined,
+  EllipsisOutlined,
+  DownloadOutlined, DeleteOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { KnowledgeDoc, KnowledgeTemplate, useAppStore } from '../stores/appStore'
-import { TemplateManagerModal } from './TemplateManagerModal'
 
 const { Text } = Typography
 
@@ -20,24 +19,18 @@ interface KnowledgeTableProps {
   docs: KnowledgeDoc[]
   templates: KnowledgeTemplate[]
   themeMode?: 'default' | 'monochrome'
+  viewMode: 'table' | 'card'
+  selectedRowKeys: string[]
+  onSelectedRowKeysChange: (keys: string[]) => void
   onView: (doc: KnowledgeDoc) => void
   onDelete: (docId: string) => void
   onRefresh: () => void
-  onCreateNew: () => void
 }
 
-export function KnowledgeTable({ docs, templates, themeMode = 'default', onView, onDelete, onRefresh, onCreateNew }: KnowledgeTableProps) {
+export function KnowledgeTable({ docs, templates, themeMode = 'default', viewMode, selectedRowKeys, onSelectedRowKeysChange, onView, onDelete, onRefresh }: KnowledgeTableProps) {
   const { modal, message } = App.useApp()
   const { tasks, realtimeRecordings } = useAppStore()
-  const [search, setSearch] = useState('')
-  const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
-  const [templateModalOpen, setTemplateModalOpen] = useState(false)
-  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
-
-  const filtered = search
-    ? docs.filter(d => d.title.toLowerCase().includes(search.toLowerCase()))
-    : docs
 
   const getTemplateName = (templateId: string) => {
     const tpl = templates.find(t => t.id === templateId)
@@ -53,7 +46,8 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
           return task ? { name: task.fileName, wordCount: task.wordCount || 0 } : { name: '已删除', wordCount: 0 }
         } else {
           const rec = realtimeRecordings.find(r => r.id === src.id)
-          return rec ? { name: rec.title, wordCount: rec.wordCount } : { name: '已删除', wordCount: 0 }
+          // 录音的字数在其关联转写任务上，此处暂时不再显示字数（或传 0）
+          return rec ? { name: rec.title, wordCount: 0 } : { name: '已删除', wordCount: 0 }
         }
       })
       return { count: sources.length, details }
@@ -90,15 +84,36 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
 
   const renderStatus = (status: string) => {
     const isMonochrome = themeMode === 'monochrome'
+
+    if (isMonochrome) {
+      // 黑白主题：使用灰度色系，与 TaskTable 一致
+      const colorMap: Record<string, string> = {
+        generating: '#18181b',
+        completed: '#27272a',
+        failed: '#3f3f46',
+      }
+      const color = colorMap[status] || '#71717a'
+
+      return (
+        <Tag
+          icon={status === 'generating' ? <LoadingOutlined spin /> : undefined}
+          style={{ backgroundColor: color, borderColor: color, color: '#fff' }}
+        >
+          {status === 'generating' ? '生成中' : status === 'completed' ? '已完成' : status === 'failed' ? '失败' : status}
+        </Tag>
+      )
+    }
+
+    // 默认主题：彩色，移除图标（completed/failed 不需要图标）
     switch (status) {
       case 'generating':
-        return <Tag icon={<LoadingOutlined spin />} color={isMonochrome ? undefined : 'processing'} style={isMonochrome ? { background: '#000', color: '#fff', border: '1px solid #000' } : undefined}>生成中</Tag>
+        return <Tag icon={<LoadingOutlined spin />} color="processing">生成中</Tag>
       case 'completed':
-        return <Tag icon={<CheckCircleOutlined />} color={isMonochrome ? undefined : 'success'} style={isMonochrome ? { background: '#000', color: '#fff', border: '1px solid #000' } : undefined}>已完成</Tag>
+        return <Tag color="success">已完成</Tag>
       case 'failed':
-        return <Tag icon={<CloseCircleOutlined />} color={isMonochrome ? undefined : 'error'} style={isMonochrome ? { background: '#000', color: '#fff', border: '1px solid #000' } : undefined}>失败</Tag>
+        return <Tag color="error">失败</Tag>
       default:
-        return <Tag style={isMonochrome ? { background: '#000', color: '#fff', border: '1px solid #000' } : undefined}>{status}</Tag>
+        return <Tag>{status}</Tag>
     }
   }
 
@@ -134,66 +149,6 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
       onOk: () => onDelete(docId),
     })
   }, [modal, onDelete])
-
-  const handleBatchDelete = useCallback(() => {
-    if (selectedRowKeys.length === 0) return
-
-    modal.confirm({
-      title: `确定删除选中的 ${selectedRowKeys.length} 个文档？`,
-      content: '删除后无法恢复',
-      okText: '删除',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: async () => {
-        setLoading(true)
-        for (const id of selectedRowKeys) {
-          await window.electronAPI.deleteKnowledgeDoc(id)
-        }
-        setLoading(false)
-        setSelectedRowKeys([])
-        message.success(`已删除 ${selectedRowKeys.length} 个文档`)
-        onRefresh()
-      }
-    })
-  }, [selectedRowKeys, modal, message, onRefresh])
-
-  const handleBatchExport = useCallback(async (format: 'md' | 'txt' | 'pdf') => {
-    if (selectedRowKeys.length === 0) return
-
-    const selectedDocs = docs.filter(d => selectedRowKeys.includes(d.id))
-    const exportableDocs = selectedDocs.filter(d => d.status === 'completed')
-
-    if (exportableDocs.length === 0) {
-      message.warning('选中的文档中没有已完成的文档')
-      return
-    }
-
-    if (exportableDocs.length < selectedDocs.length) {
-      message.info(`将导出 ${exportableDocs.length} 个文件（跳过 ${selectedDocs.length - exportableDocs.length} 个未完成的文档）`)
-    }
-
-    setLoading(true)
-    const result = await window.electronAPI.batchExportKnowledge({
-      docIds: exportableDocs.map(d => d.id),
-      format
-    })
-    setLoading(false)
-
-    if (result.error) {
-      message.error(result.error)
-      return
-    }
-
-    if (result.canceled) return
-
-    if (result.failed === 0) {
-      message.success(`已导出 ${result.success} 个文件到 ${result.targetDir}`)
-    } else {
-      message.warning(`已导出 ${result.success} 个文件，${result.failed} 个失败`)
-    }
-
-    setSelectedRowKeys([])
-  }, [selectedRowKeys, docs, message])
 
   const getMenuItems = (doc: KnowledgeDoc): MenuProps['items'] => [
     { key: 'md', icon: <DownloadOutlined />, label: '导出 Markdown', disabled: doc.status !== 'completed' },
@@ -266,68 +221,34 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
     },
   ]
 
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Space>
-          <Input
-            placeholder="搜索文档..."
-            prefix={<SearchOutlined />}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            allowClear
-            style={{ width: 240 }}
-          />
-          <Segmented
-            value={viewMode}
-            onChange={v => setViewMode(v as 'table' | 'card')}
-            options={[
-              { value: 'table', icon: <UnorderedListOutlined /> },
-              { value: 'card', icon: <AppstoreOutlined /> },
-            ]}
-          />
-        </Space>
-        <Space>
-          {selectedRowKeys.length > 0 && (
-            <>
-              <Button danger onClick={handleBatchDelete}>
-                删除选中 ({selectedRowKeys.length})
-              </Button>
-              <Dropdown
-                menu={{
-                  items: [
-                    { key: 'md', label: '导出为 Markdown' },
-                    { key: 'txt', label: '导出为 TXT' },
-                    { key: 'pdf', label: '导出为 PDF' },
-                  ],
-                  onClick: ({ key }) => handleBatchExport(key as 'md' | 'txt' | 'pdf')
-                }}
-              >
-                <Button>
-                  批量导出 <DownloadOutlined />
-                </Button>
-              </Dropdown>
-            </>
-          )}
-          <Button icon={<SettingOutlined />} onClick={() => setTemplateModalOpen(true)}>
-            管理模板
-          </Button>
-        </Space>
-      </div>
+  // Card status border color（与 TaskTable 一致）
+  const statusBorderColor: Record<string, string> = themeMode === 'default' ? {
+    generating: '#1677ff',
+    completed: '#52c41a',
+    failed: '#ff4d4f',
+  } : {
+    generating: '#18181b',
+    completed: '#27272a',
+    failed: '#3f3f46',
+  }
 
-      {filtered.length === 0 ? (
-        <Empty description={search ? '没有匹配的文档' : '暂无文档，点击上方"新建文档"开始'} style={{ padding: '48px 0' }} />
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+        {docs.length === 0 ? (
+        <Empty description='暂无文档，点击上方"新建文档"开始' style={{ padding: '48px 0' }} />
       ) : viewMode === 'table' ? (
         <Table
-          dataSource={filtered}
+          dataSource={docs}
           columns={columns}
           rowKey="id"
           loading={loading}
           size="small"
-          pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
+          sticky
+          pagination={false}
           rowSelection={{
             selectedRowKeys,
-            onChange: (keys) => setSelectedRowKeys(keys as string[])
+            onChange: (keys) => onSelectedRowKeysChange(keys as string[])
           }}
           onRow={(doc) => ({
             onClick: () => doc.status === 'completed' && onView(doc),
@@ -336,7 +257,7 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
         />
       ) : (
         <Row gutter={[16, 16]}>
-          {filtered.map(doc => {
+          {docs.map(doc => {
             const { count, details } = getSourceInfo(doc.sourceIds)
             const sourceNames = details.map(d => d.name).join(' · ')
 
@@ -345,7 +266,10 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
                 <Card
                   hoverable={doc.status === 'completed'}
                   onClick={() => doc.status === 'completed' && onView(doc)}
-                  styles={{ body: { padding: '16px 20px' } }}
+                  style={{
+                    border: `1px solid ${statusBorderColor[doc.status] || '#d9d9d9'}`,
+                  }}
+                  styles={{ body: { padding: '10px 14px' } }}
                 >
                   {/* Header: title + status + menu */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -365,7 +289,7 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
                   </div>
 
                   {/* Date */}
-                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>{formatDate(doc.updatedAt)}</Text>
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>{formatDate(doc.updatedAt)}</Text>
 
                   {/* Info: 2-column grid */}
                   <Row gutter={[8, 6]}>
@@ -390,11 +314,18 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', onView,
           })}
         </Row>
       )}
+      </div>
 
-      <TemplateManagerModal
-        open={templateModalOpen}
-        onClose={() => setTemplateModalOpen(false)}
-      />
+      {themeMode === 'monochrome' && (
+        <style>{`
+          .ant-table-tbody > tr.ant-table-row-selected > td {
+            background: #fafafa !important;
+          }
+          .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+            background: #f5f5f5 !important;
+          }
+        `}</style>
+      )}
     </div>
   )
 }

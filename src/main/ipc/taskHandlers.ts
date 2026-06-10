@@ -54,6 +54,7 @@ async function addFilesCommon(filePaths: string[], modelType?: string) {
         fileSize: statSync(filePath).size,
         duration: info.duration,
         modelType,
+        source: 'upload',
       })
 
       // 注册文件到 FileManager

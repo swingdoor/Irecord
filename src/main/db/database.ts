@@ -24,6 +24,8 @@ export interface Task {
   completedAt: string | null
   processingTime: number | null
   wordCount: number | null
+  source: 'upload' | 'recording'
+  sourceId: string | null
 }
 
 export interface TaskResult {
@@ -43,13 +45,7 @@ export interface RealtimeRecording {
   fileId: string | null
   fileSize: number
   duration: number
-  wordCount: number
-  modelType: string | null
   createdAt: string
-  text: string
-  segments: string
-  originalFilePath?: string
-  postProcessing?: string
 }
 
 export interface KnowledgeDoc {
@@ -110,6 +106,11 @@ async function getDb(): Promise<SqlJsDatabase> {
   } catch (e) {
     // 列已存在，忽略错误
   }
+
+  // 迁移：为 tasks 添加来源判别列（统一文件上传与录音转写流水线）
+  // source: 'upload' | 'recording'；sourceId: recording 来源时 = realtime_recordings.id
+  try { db.run(`ALTER TABLE tasks ADD COLUMN source TEXT DEFAULT 'upload'`) } catch { /* already exists */ }
+  try { db.run(`ALTER TABLE tasks ADD COLUMN sourceId TEXT`) } catch { /* already exists */ }
 
   db.run(`
     CREATE TABLE IF NOT EXISTS results (
@@ -226,7 +227,7 @@ function queryOne(d: SqlJsDatabase, sql: string, params: any[] = []): any | unde
 
 // ===== Task CRUD =====
 
-export async function createTask(file: { fileName: string; filePath: string; fileSize: number; duration: number; modelType?: string; status?: Task['status']; wordCount?: number }): Promise<Task> {
+export async function createTask(file: { fileName: string; filePath: string; fileSize: number; duration: number; modelType?: string; status?: Task['status']; wordCount?: number; source?: 'upload' | 'recording'; sourceId?: string | null }): Promise<Task> {
   const d = await getDb()
   const task: Task = {
     id: randomUUID(),
@@ -242,11 +243,13 @@ export async function createTask(file: { fileName: string; filePath: string; fil
     completedAt: null,
     processingTime: null,
     wordCount: file.wordCount ?? null,
+    source: file.source || 'upload',
+    sourceId: file.sourceId ?? null,
   }
 
   d.run(
-    'INSERT INTO tasks (id, fileName, filePath, fileSize, duration, status, modelType, createdAt, wordCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [task.id, task.fileName, task.filePath, task.fileSize, task.duration, task.status, task.modelType, task.createdAt, task.wordCount]
+    'INSERT INTO tasks (id, fileName, filePath, fileSize, duration, status, modelType, createdAt, wordCount, source, sourceId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [task.id, task.fileName, task.filePath, task.fileSize, task.duration, task.status, task.modelType, task.createdAt, task.wordCount, task.source, task.sourceId]
   )
   saveDb()
   return task
@@ -334,12 +337,6 @@ export async function createRealtimeRecording(recording: {
   filePath: string
   fileSize: number
   duration: number
-  wordCount: number
-  text: string
-  segments: any[]
-  modelType?: string
-  originalFilePath?: string
-  postProcessing?: any
 }): Promise<RealtimeRecording> {
   const d = await getDb()
   const rec: RealtimeRecording = {
@@ -348,19 +345,14 @@ export async function createRealtimeRecording(recording: {
     filePath: recording.filePath,
     fileSize: recording.fileSize,
     duration: recording.duration,
-    wordCount: recording.wordCount,
-    modelType: recording.modelType || null,
     createdAt: new Date().toISOString(),
-    text: recording.text,
-    segments: JSON.stringify(recording.segments),
     fileId: null,
-    originalFilePath: recording.originalFilePath,
-    postProcessing: recording.postProcessing ? JSON.stringify(recording.postProcessing) : undefined,
   }
 
+  // 遗骨列（text/segments/wordCount/modelType/originalFilePath/postProcessing）保留物理列但停用，写入空值
   d.run(
-    'INSERT INTO realtime_recordings (id, title, filePath, fileSize, duration, wordCount, modelType, createdAt, text, segments, originalFilePath, postProcessing) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [rec.id, rec.title, rec.filePath, rec.fileSize, rec.duration, rec.wordCount, rec.modelType, rec.createdAt, rec.text, rec.segments, rec.originalFilePath || null, rec.postProcessing || null]
+    'INSERT INTO realtime_recordings (id, title, filePath, fileSize, duration, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+    [rec.id, rec.title, rec.filePath, rec.fileSize, rec.duration, rec.createdAt]
   )
   saveDb()
   return rec
@@ -385,6 +377,19 @@ export async function deleteRealtimeRecording(id: string) {
 export async function getNextPendingTask(): Promise<Task | undefined> {
   const d = await getDb()
   return queryOne(d, "SELECT * FROM tasks WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 1")
+}
+
+/**
+ * 查询某条录音关联的最新转写任务（source='recording' AND sourceId=recordingId）。
+ * 用于派生录音的转写状态：无 → none；pending/processing → 转写中；completed/failed → 对应状态。
+ */
+export async function getRecordingTranscriptionTask(recordingId: string): Promise<Task | undefined> {
+  const d = await getDb()
+  return queryOne(
+    d,
+    "SELECT * FROM tasks WHERE source = 'recording' AND sourceId = ? ORDER BY createdAt DESC LIMIT 1",
+    [recordingId]
+  )
 }
 
 export async function hasProcessingTask(): Promise<boolean> {

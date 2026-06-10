@@ -289,13 +289,15 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
         {hasContent && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, gap: 4 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, gap: 4, flexShrink: 0 }}>
             <Tooltip title="重新生成"><Button type="text" size="small" icon={<ReloadOutlined />} onClick={() => regenerate(type)} /></Tooltip>
             <Tooltip title="复制"><Button type="text" size="small" icon={<CopyOutlined />} onClick={() => handleCopy(type)} /></Tooltip>
             <Tooltip title="导出 TXT"><Button type="text" size="small" icon={<DownloadOutlined />} onClick={() => handleExport(type, label)} /></Tooltip>
           </div>
         )}
-        <div className="ai-scroll-area" style={{ flex: 1, ...scrollStyle }}>
+        <div className="ai-scroll-area" style={{ flex: 1, minHeight: 0, ...scrollStyle }}>
+
+
           {loading && <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" tip="AI 分析中..." /></div>}
           {error && <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />}
           {hasContent && renderers[type](content!)}
@@ -311,10 +313,10 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <Title level={5} style={{ marginBottom: 16 }}>AI 智能分析</Title>
+      <Title level={5} style={{ marginBottom: 16, flexShrink: 0 }}>AI 智能分析</Title>
       <Tabs
         className="ai-panel-tabs"
-        style={{ flex: 1 }}
+        style={{ flex: 1, minHeight: 0 }}
         items={[
           { key: 'summary', label: '摘要', children: renderTab('summary', '摘要') },
           { key: 'speakers', label: '发言人', children: renderTab('speakers', '发言人总结') },
@@ -324,7 +326,7 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
             key: 'ask', label: '提问',
             children: (
               <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-                <Space.Compact style={{ marginBottom: 12, width: '100%' }}>
+                <Space.Compact style={{ marginBottom: 12, width: '100%', flexShrink: 0 }}>
                   <TextArea
                     value={question} onChange={e => setQuestion(e.target.value)}
                     placeholder="输入你的问题..."
@@ -335,13 +337,13 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
                   <Button type="primary" icon={<SendOutlined />} onClick={handleAsk} loading={askLoading} style={{ height: 'auto' }} />
                 </Space.Compact>
                 {askResult && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, gap: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, gap: 4, flexShrink: 0 }}>
                     <Tooltip title="重新生成"><Button type="text" size="small" icon={<ReloadOutlined />} onClick={handleRegenerateAsk} /></Tooltip>
                     <Tooltip title="复制"><Button type="text" size="small" icon={<CopyOutlined />} onClick={handleCopyAsk} /></Tooltip>
                     <Tooltip title="导出 TXT"><Button type="text" size="small" icon={<DownloadOutlined />} onClick={handleExportAsk} /></Tooltip>
                   </div>
                 )}
-                <div className="ai-scroll-area" style={{ flex: 1, ...scrollStyle }}>
+                <div className="ai-scroll-area" style={{ flex: 1, minHeight: 0, ...scrollStyle }}>
                   {askLoading && <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" tip="思考中..." /></div>}
                   {askError && <Alert type="error" message={askError} showIcon />}
                   {askResult && <RenderAsk raw={askResult} />}
@@ -371,6 +373,7 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
         }
         .ai-panel-tabs .ant-tabs-tabpane {
           height: 100% !important;
+          overflow: hidden !important;
         }
         .ai-scroll-area::-webkit-scrollbar {
           display: none !important;

@@ -1,6 +1,6 @@
-import { useEffect, useCallback, useState } from 'react'
-import { Typography, Alert, Button, Segmented, Space, Modal, Tabs } from 'antd'
-import { BgColorsOutlined, SettingOutlined } from '@ant-design/icons'
+import { useEffect, useCallback, useState, useMemo } from 'react'
+import { Typography, Alert, Button, Segmented, Space, Modal, Tabs, Input, Dropdown, message } from 'antd'
+import { BgColorsOutlined, SettingOutlined, SearchOutlined } from '@ant-design/icons'
 import { useAppStore, Task, RealtimeRecording, KnowledgeDoc } from '../stores/appStore'
 import { FeatureCards } from '../components/FeatureCards'
 import { TaskTable } from '../components/TaskTable'
@@ -8,6 +8,7 @@ import { RealtimeRecordingTable } from '../components/RealtimeRecordingTable'
 import { KnowledgeTable } from '../components/KnowledgeTable'
 import { CreateDocModal } from '../components/CreateDocModal'
 import { SettingsModal } from '../components/SettingsModal'
+import { TemplateManagerModal } from '../components/TemplateManagerModal'
 
 const { Title } = Typography
 
@@ -31,7 +32,53 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
   const [addErrors, setAddErrors] = useState<string[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [createDocModalOpen, setCreateDocModalOpen] = useState(false)
+  const [templateModalOpen, setTemplateModalOpen] = useState(false)
   const [taskProgress, setTaskProgress] = useState<Record<string, { stage: string; percent: number }>>({})
+  const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
+  const [searchTerm, setSearchTerm] = useState('')
+
+  // 三个 tab 的选中状态
+  const [selectedRealtimeRecordings, setSelectedRealtimeRecordings] = useState<string[]>([])
+  const [selectedTasks, setSelectedTasks] = useState<string[]>([])
+  const [selectedKnowledgeDocs, setSelectedKnowledgeDocs] = useState<string[]>([])
+
+  // 当前 tab 的选中数据
+  const currentSelectedKeys = useMemo(() => {
+    if (activeTab === 'realtime') return selectedRealtimeRecordings
+    if (activeTab === 'upload') return selectedTasks
+    return selectedKnowledgeDocs
+  }, [activeTab, selectedRealtimeRecordings, selectedTasks, selectedKnowledgeDocs])
+
+  const setCurrentSelectedKeys = useCallback((keys: string[]) => {
+    if (activeTab === 'realtime') setSelectedRealtimeRecordings(keys)
+    else if (activeTab === 'upload') setSelectedTasks(keys)
+    else setSelectedKnowledgeDocs(keys)
+  }, [activeTab])
+
+  // 根据当前 tab 和搜索词过滤数据
+  const currentData = useMemo(() => {
+    let allData: any[] = []
+
+    if (activeTab === 'realtime') {
+      allData = realtimeRecordings
+    } else if (activeTab === 'upload') {
+      allData = tasks.filter(t => t.source !== 'recording')
+    } else if (activeTab === 'knowledge') {
+      allData = knowledgeDocs
+    }
+
+    if (!searchTerm) return allData
+
+    const term = searchTerm.toLowerCase()
+    if (activeTab === 'realtime') {
+      return allData.filter((r: RealtimeRecording) => r.title.toLowerCase().includes(term))
+    } else if (activeTab === 'upload') {
+      return allData.filter((t: Task) => t.fileName.toLowerCase().includes(term))
+    } else if (activeTab === 'knowledge') {
+      return allData.filter((d: KnowledgeDoc) => d.title.toLowerCase().includes(term))
+    }
+    return allData
+  }, [activeTab, realtimeRecordings, tasks, knowledgeDocs, searchTerm])
 
   useEffect(() => {
     refreshTasks()
@@ -194,6 +241,7 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
 
   const handleTabChange = useCallback(async (key: string) => {
     setActiveTab(key)
+    setSearchTerm('') // 切换 tab 清空搜索
     const settings = await window.electronAPI.getSettings()
     await window.electronAPI.saveSettings({ ...settings, activeTab: key })
   }, [])
@@ -202,6 +250,11 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     setCurrentRealtimeRecordingId(recording.id)
     setPage('realtimeRecordingDetail')
   }, [setCurrentRealtimeRecordingId, setPage])
+
+  const handleViewTranscription = useCallback((taskId: string) => {
+    setCurrentTaskId(taskId)
+    setPage('taskDetail')
+  }, [setCurrentTaskId, setPage])
 
   const handleDeleteRecording = useCallback(async (id: string) => {
     await window.electronAPI.deleteRealtimeRecording(id)
@@ -226,72 +279,277 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     await window.electronAPI.saveSettings({ ...settings, activeTab: 'knowledge' })
   }, [refreshKnowledgeDocs])
 
+  // 批量删除
+  const handleBatchDelete = useCallback(() => {
+    if (currentSelectedKeys.length === 0) return
+
+    const itemName = activeTab === 'realtime' ? '录音' : activeTab === 'upload' ? '任务' : '文档'
+
+    Modal.confirm({
+      title: `确定删除选中的 ${currentSelectedKeys.length} 个${itemName}？`,
+      content: '删除后无法恢复',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        if (activeTab === 'realtime') {
+          for (const id of currentSelectedKeys) {
+            await window.electronAPI.deleteRealtimeRecording(id)
+          }
+          refreshRealtimeRecordings()
+          setSelectedRealtimeRecordings([])
+        } else if (activeTab === 'upload') {
+          for (const id of currentSelectedKeys) {
+            await window.electronAPI.deleteTask(id)
+          }
+          refreshTasks()
+          setSelectedTasks([])
+        } else {
+          for (const id of currentSelectedKeys) {
+            await window.electronAPI.deleteKnowledgeDoc(id)
+          }
+          refreshKnowledgeDocs()
+          setSelectedKnowledgeDocs([])
+        }
+        message.success(`已删除 ${currentSelectedKeys.length} 个${itemName}`)
+      }
+    })
+  }, [currentSelectedKeys, activeTab, refreshRealtimeRecordings, refreshTasks, refreshKnowledgeDocs])
+
+  // 批量导出
+  const handleBatchExport = useCallback(async (format: 'wav' | 'txt' | 'md' | 'pdf') => {
+    if (currentSelectedKeys.length === 0) return
+
+    if (activeTab === 'realtime' && format === 'wav') {
+      const result = await window.electronAPI.batchExportRecordingWav(currentSelectedKeys)
+      if (result.error) {
+        message.error(result.error)
+      } else if (!result.canceled) {
+        if (result.failed === 0) {
+          message.success(`已导出 ${result.success} 个文件到 ${result.targetDir}`)
+        } else {
+          message.warning(`已导出 ${result.success} 个文件，${result.failed} 个失败`)
+        }
+      }
+      setSelectedRealtimeRecordings([])
+    } else if (activeTab === 'upload' && format === 'txt') {
+      const result = await window.electronAPI.batchExportTaskTxt(currentSelectedKeys)
+      if (result.error) {
+        message.error(result.error)
+      } else if (!result.canceled) {
+        if (result.failed === 0) {
+          message.success(`已导出 ${result.success} 个文件到 ${result.targetDir}`)
+        } else {
+          message.warning(`已导出 ${result.success} 个文件，${result.failed} 个失败`)
+        }
+      }
+      setSelectedTasks([])
+    } else if (activeTab === 'knowledge' && (format === 'md' || format === 'txt' || format === 'pdf')) {
+      const result = await window.electronAPI.batchExportKnowledge({
+        docIds: currentSelectedKeys,
+        format
+      })
+      if (result.error) {
+        message.error(result.error)
+      } else if (!result.canceled) {
+        if (result.failed === 0) {
+          message.success(`已导出 ${result.success} 个文件到 ${result.targetDir}`)
+        } else {
+          message.warning(`已导出 ${result.success} 个文件，${result.failed} 个失败`)
+        }
+      }
+      setSelectedKnowledgeDocs([])
+    }
+  }, [currentSelectedKeys, activeTab])
+
   return (
     <div
-      style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, minHeight: '100vh' }}
+      style={{
+        height: 'calc(100vh - 30px)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
       onDragOver={e => e.preventDefault()}
       onDrop={handleDrop}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={3} style={{ margin: 0 }}>你说我记</Title>
-        <Space>
-          <Segmented
-            value={themeMode}
-            onChange={handleThemeChange}
-            options={[
-              { label: '默认', value: 'default', icon: <BgColorsOutlined /> },
-              { label: '黑白', value: 'monochrome' },
-            ]}
-          />
-          <Button type="text" icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)} />
-        </Space>
+      {/* Header 固定 */}
+      <div style={{ padding: '24px 24px 16px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <Title level={3} style={{ margin: 0 }}>你说我记</Title>
+          <Space>
+            <Segmented
+              value={themeMode}
+              onChange={handleThemeChange}
+              options={[
+                { label: '默认', value: 'default', icon: <BgColorsOutlined /> },
+                { label: '黑白', value: 'monochrome' },
+              ]}
+            />
+            <Button type="text" icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)} />
+          </Space>
+        </div>
+
+        {addErrors.length > 0 && (
+          <Alert type="error" message={addErrors.join('；')} closable onClose={() => setAddErrors([])} style={{ marginBottom: 16 }} />
+        )}
+
+        <FeatureCards
+          onUpload={handleAddFiles}
+          onRecord={handleRecord}
+          onCreateDoc={() => setCreateDocModalOpen(true)}
+          onManageTemplates={() => setTemplateModalOpen(true)}
+        />
       </div>
 
-      {addErrors.length > 0 && (
-        <Alert type="error" message={addErrors.join('；')} closable onClose={() => setAddErrors([])} />
-      )}
+      {/* Tabs + 内容区。搜索 + 视图切换通过 tabBarExtraContent 与 Tab 栏同行 */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 24px 24px', overflow: 'hidden', minHeight: 0 }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={handleTabChange}
+          className="list-page-tabs"
+          style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', minHeight: 0 }}
+          tabBarExtraContent={
+            <Space>
+              {currentSelectedKeys.length > 0 && (
+                <>
+                  <Button danger size="small" onClick={handleBatchDelete}>
+                    删除 ({currentSelectedKeys.length})
+                  </Button>
+                  {activeTab === 'realtime' && (
+                    <Button size="small" onClick={() => handleBatchExport('wav')}>
+                      导出音频
+                    </Button>
+                  )}
+                  {activeTab === 'upload' && (
+                    <Button size="small" onClick={() => handleBatchExport('txt')}>
+                      导出 TXT
+                    </Button>
+                  )}
+                  {activeTab === 'knowledge' && (
+                    <Dropdown
+                      menu={{
+                        items: [
+                          { key: 'md', label: '导出为 Markdown' },
+                          { key: 'txt', label: '导出为 TXT' },
+                          { key: 'pdf', label: '导出为 PDF' },
+                        ],
+                        onClick: ({ key }) => handleBatchExport(key as 'md' | 'txt' | 'pdf')
+                      }}
+                      trigger={['click']}
+                    >
+                      <Button size="small">导出</Button>
+                    </Dropdown>
+                  )}
+                </>
+              )}
+              <Input
+                placeholder={`搜索${activeTab === 'realtime' ? '录音' : activeTab === 'upload' ? '文件' : '文档'}...`}
+                prefix={<SearchOutlined />}
+                value={searchTerm}
+                onChange={e => {
+                  setSearchTerm(e.target.value)
+                }}
+                allowClear
+                style={{ width: currentSelectedKeys.length > 0 ? 180 : 240 }}
+              />
+              <Segmented
+                value={viewMode}
+                onChange={v => {
+                  setViewMode(v as 'table' | 'card')
+                }}
+                options={[
+                  { label: '列表', value: 'table' },
+                  { label: '卡片', value: 'card' },
+                ]}
+              />
+            </Space>
+          }
+          items={[
+            {
+              key: 'realtime',
+              label: '实时录音',
+              children: (
+                <RealtimeRecordingTable
+                  recordings={currentData}
+                  tasks={tasks}
+                  themeMode={themeMode}
+                  processingStartTime={processingStartTime}
+                  taskProgress={taskProgress}
+                  viewMode={viewMode}
+                  selectedRowKeys={selectedRealtimeRecordings}
+                  onSelectedRowKeysChange={setSelectedRealtimeRecordings}
+                  onView={handleViewRecording}
+                  onViewTranscription={handleViewTranscription}
+                  onDelete={handleDeleteRecording}
+                  onRefresh={refreshRealtimeRecordings}
+                />
+              ),
+            },
+            {
+              key: 'upload',
+              label: '文件上传',
+              children: (
+                <TaskTable
+                  tasks={currentData}
+                  processingStartTime={processingStartTime}
+                  taskProgress={taskProgress}
+                  themeMode={themeMode}
+                  viewMode={viewMode}
+                  selectedRowKeys={selectedTasks}
+                  onSelectedRowKeysChange={setSelectedTasks}
+                  onViewDetail={handleViewDetail}
+                  onDelete={handleDelete}
+                  onRestart={handleRestart}
+                  onCancel={handleCancel}
+                  onExportAudio={handleExportAudio}
+                  onDeepAnalysis={handleDeepAnalysisFromList}
+                />
+              ),
+            },
+            {
+              key: 'knowledge',
+              label: '知识整理',
+              children: (
+                <KnowledgeTable
+                  docs={currentData}
+                  templates={templates}
+                  themeMode={themeMode}
+                  viewMode={viewMode}
+                  selectedRowKeys={selectedKnowledgeDocs}
+                  onSelectedRowKeysChange={setSelectedKnowledgeDocs}
+                  onView={handleViewKnowledgeDoc}
+                  onDelete={handleDeleteKnowledgeDoc}
+                  onRefresh={refreshKnowledgeDocs}
+                />
+              ),
+            },
+          ]}
+        />
+      </div>
 
-      <FeatureCards
-        onUpload={handleAddFiles}
-        onRecord={handleRecord}
-        onCreateDoc={() => setCreateDocModalOpen(true)}
-      />
-
-      <Tabs activeKey={activeTab} onChange={handleTabChange}>
-        <Tabs.TabPane tab="实时录音" key="realtime">
-          <RealtimeRecordingTable
-            recordings={realtimeRecordings}
-            onView={handleViewRecording}
-            onDelete={handleDeleteRecording}
-            onRefresh={refreshRealtimeRecordings}
-          />
-        </Tabs.TabPane>
-        <Tabs.TabPane tab="文件上传" key="upload">
-          <TaskTable
-            tasks={tasks}
-            processingStartTime={processingStartTime}
-            taskProgress={taskProgress}
-            themeMode={themeMode}
-            onViewDetail={handleViewDetail}
-            onDelete={handleDelete}
-            onRestart={handleRestart}
-            onCancel={handleCancel}
-            onExportAudio={handleExportAudio}
-            onDeepAnalysis={handleDeepAnalysisFromList}
-          />
-        </Tabs.TabPane>
-        <Tabs.TabPane tab="知识整理" key="knowledge">
-          <KnowledgeTable
-            docs={knowledgeDocs}
-            templates={templates}
-            themeMode={themeMode}
-            onView={handleViewKnowledgeDoc}
-            onDelete={handleDeleteKnowledgeDoc}
-            onRefresh={refreshKnowledgeDocs}
-            onCreateNew={() => setCreateDocModalOpen(true)}
-          />
-        </Tabs.TabPane>
-      </Tabs>
+      <style>{`
+        .list-page-tabs.ant-tabs {
+          display: flex !important;
+          flex-direction: column !important;
+          height: 100% !important;
+        }
+        .list-page-tabs .ant-tabs-nav {
+          flex-shrink: 0 !important;
+        }
+        .list-page-tabs .ant-tabs-content-holder {
+          flex: 1 !important;
+          overflow: hidden !important;
+          min-height: 0 !important;
+        }
+        .list-page-tabs .ant-tabs-content {
+          height: 100% !important;
+        }
+        .list-page-tabs .ant-tabs-tabpane {
+          height: 100% !important;
+          overflow: hidden !important;
+        }
+      `}</style>
 
       <CreateDocModal
         open={createDocModalOpen}
@@ -304,6 +562,11 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
         onClose={() => setSettingsOpen(false)}
         availableModels={availableModels}
         onSettingsChange={handleSettingsChange}
+      />
+
+      <TemplateManagerModal
+        open={templateModalOpen}
+        onClose={() => setTemplateModalOpen(false)}
       />
     </div>
   )
