@@ -11,6 +11,9 @@ resources/
 # Claude AI
 .claude/
 
+# OpenSpec
+openspec/
+
 # Environment variables
 .env
 .env.local
