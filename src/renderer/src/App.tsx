@@ -63,8 +63,8 @@ function App() {
       Select: {
         colorBorder: '#e4e4e7',
         colorPrimaryHover: '#27272a',
-        optionSelectedColor: '#ffffff',
-        optionSelectedBg: '#18181b',
+        optionSelectedColor: '#18181b',
+        optionSelectedBg: '#f4f4f5',
       },
       Card: {
         colorBorderSecondary: '#e4e4e7',
