@@ -142,10 +142,11 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     setAddErrors([])
 
     // 转写前校验资源
-    const { ffmpegExists, hasAnyModel } = await window.electronAPI.checkResources()
-    if (!ffmpegExists || !hasAnyModel) {
+    const { ffmpegExists, sherpaCliRuntime, hasAnyModel } = await window.electronAPI.checkResources()
+    if (!ffmpegExists || !sherpaCliRuntime?.available || !hasAnyModel) {
       const missing = [
         !ffmpegExists ? 'FFmpeg' : null,
+        !sherpaCliRuntime?.available ? 'Sherpa CLI' : null,
         !hasAnyModel ? '模型' : null,
       ].filter(Boolean).join(' 和 ')
 
@@ -173,10 +174,11 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     setAddErrors([])
 
     // 转写前校验资源
-    const { ffmpegExists, hasAnyModel } = await window.electronAPI.checkResources()
-    if (!ffmpegExists || !hasAnyModel) {
+    const { ffmpegExists, sherpaCliRuntime, hasAnyModel } = await window.electronAPI.checkResources()
+    if (!ffmpegExists || !sherpaCliRuntime?.available || !hasAnyModel) {
       const missing = [
         !ffmpegExists ? 'FFmpeg' : null,
+        !sherpaCliRuntime?.available ? 'Sherpa CLI' : null,
         !hasAnyModel ? '模型' : null,
       ].filter(Boolean).join(' 和 ')
 

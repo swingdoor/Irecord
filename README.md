@@ -2,7 +2,7 @@
 
 本地离线语音识别转写工具，基于 Electron + Sherpa-ONNX。录音或上传音视频，本地转写成文字，再借助大模型整理成结构化知识文档。音频识别全程本地运行不联网；知识整理可选接入云端 LLM。
 
-> 当前版本：v0.9.1 · 平台：Windows 10/11
+> 当前版本：v0.9.1 · 平台：Windows 10/11 · macOS (Apple Silicon / arm64)
 
 ## 功能特性
 
@@ -30,9 +30,10 @@
 
 ## 系统要求
 
-- Windows 10/11
+- Windows 10/11，或 macOS（Apple Silicon / arm64）
 - 4GB+ RAM
 - 2GB+ 磁盘空间（默认模型约 290MB，启用 Qwen3-ASR 另需约 950MB）
+- macOS 下本地编译 `nodejieba` 需要 Xcode Command Line Tools（`xcode-select --install`）
 
 ## 快速开始
 
@@ -41,6 +42,13 @@
 ```bash
 npm install
 ```
+
+原生模块说明：
+- ASR 和说话人分离通过官方 Sherpa-ONNX 静态 CLI 子进程运行，不再依赖 `sherpa-onnx-node` JS 绑定。
+- `nodejieba` 在安装时本地编译（N-API），macOS 需先装好 Xcode Command Line Tools。
+- 本地推理运行在独立 CLI 进程中，Electron 主进程只负责调度、日志和结果解析。
+- 若安装环境禁用了 npm install scripts（`ignore-scripts=true`），`nodejieba` 将无法编译、Electron 二进制不会下载——需开启脚本或手动补装。
+- 国内网络下 Electron 二进制默认从 github.com 下载较慢，本仓库 `.npmrc` 已通过 `electron_mirror` 指向 npmmirror 镜像加速（npm registry 请用各自环境配置）。
 
 ### 2. 准备模型文件
 
@@ -54,6 +62,18 @@ resources/models/
 └── speaker-diarization/                                   # 说话人分离
 ```
 
+Sherpa-ONNX CLI 运行时放在 `resources/runtimes/sherpa-onnx/<platform-arch>/`：
+
+```
+resources/runtimes/sherpa-onnx/
+├── darwin-arm64/
+│   ├── sherpa-onnx-offline
+│   └── sherpa-onnx-offline-speaker-diarization
+└── win32-x64/
+    ├── sherpa-onnx-offline.exe
+    └── sherpa-onnx-offline-speaker-diarization.exe
+```
+
 可使用脚本下载：
 
 ```bash
@@ -62,11 +82,19 @@ bash scripts/download-models.sh
 
 Qwen3-ASR 也可在应用「设置 → 模型管理」中按需下载。
 
-### 3. 准备 FFmpeg（处理视频/非标准音频时需要）
+### 3. 准备 FFmpeg（音视频统一转 WAV）
 
+应用会把所有导入文件先转换为 16kHz 单声道 PCM WAV，再交给 Sherpa CLI。运行时只需要 `ffmpeg`，不再需要 `ffprobe`。
+
+**Windows：**
 1. 访问 https://www.gyan.dev/ffmpeg/builds/
 2. 下载 Windows 版本（ffmpeg-release-essentials.zip）
 3. 解压后将 `ffmpeg.exe` 复制到 `resources/ffmpeg/` 目录
+
+**macOS（Apple Silicon）：**
+1. 通过 Homebrew 安装：`brew install ffmpeg`
+2. 将二进制复制到项目内：`cp "$(brew --prefix)/bin/ffmpeg" resources/ffmpeg/`
+   （或从 https://evermeet.cx/ffmpeg/ 下载 arm64 静态构建后放入 `resources/ffmpeg/`）
 
 ### 4. 配置 LLM（使用知识整理功能时需要）
 
@@ -96,10 +124,10 @@ npm run dev
 | 前端 | React 19 + TypeScript + TailwindCSS 4 + Ant Design 6 |
 | 状态管理 | Zustand |
 | 富文本编辑 | TipTap 3 |
-| 语音识别 | Sherpa-ONNX（SenseVoice / Qwen3-ASR） |
+| 语音识别 | Sherpa-ONNX CLI（SenseVoice / Qwen3-ASR） |
 | 说话人分离 | pyannote-segmentation + 3D-Speaker |
 | 中文分词 | nodejieba |
-| 音频处理 | FFmpeg（fluent-ffmpeg） |
+| 音频处理 | FFmpeg（固定 WAV 预处理） |
 | 知识整理 | LLM（DashScope / DeepSeek，OpenAI 兼容接口） |
 | 数据持久化 | sql.js |
 | 构建 | electron-vite + electron-builder |
@@ -139,15 +167,21 @@ node scripts/test-e2e.js  # 端到端识别测试
 ## 打包
 
 ```bash
+# Windows
 npm run build:win           # 构建 NSIS 安装包
 npm run build:win:portable  # 构建免安装版
+
+# macOS (Apple Silicon)
+npm run build:mac           # 构建 .dmg / .zip（arm64）
 ```
 
 产物输出到 `release/<version>/`。
 
+> macOS 提示：`build:mac` 产出未签名应用，自用可直接运行（首次打开需在「系统设置 → 隐私与安全性」放行，或 `xattr -dr com.apple.quarantine <App>`）。对外分发需 Apple Developer 账号做代码签名与公证。
+
 ## 限制
 
-- 仅支持 CPU 推理（暂不支持 GPU 加速）
+- 仅支持 CPU 推理；当前 macOS arm64 官方静态 CLI 不支持 Apple GPU/CoreML 加速
 - Qwen3-ASR 模型较大（~950MB），首次加载需数秒
 - 知识整理功能依赖外部 LLM 服务，需联网并配置 API Key
 

@@ -1,82 +1,125 @@
-import ffmpeg from 'fluent-ffmpeg'
-import { getFfmpegPath, getFfprobePath } from '../utils/paths'
+import { spawn, type ChildProcess } from 'child_process'
 import { join } from 'path'
-import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
-
-// 设置 FFmpeg 和 FFprobe 路径
-ffmpeg.setFfmpegPath(getFfmpegPath())
-ffmpeg.setFfprobePath(getFfprobePath())
+import { getFfmpegPath } from '../utils/paths'
+import { getTempDir, deleteTempFile } from './temp'
+import { readWavInfo, type WavInfo } from './wav'
 
 export interface AudioInfo {
-  duration: number      // 秒
-  format: string        // 格式名称
-  sampleRate: number    // 采样率
-  channels: number      // 声道数
-  bitRate: number       // 比特率
-  codec: string         // 编解码器
+  duration: number
+  format: string
+  sampleRate: number
+  channels: number
+  bitRate: number
+  codec: string
+}
+
+export interface ConvertToWavOptions {
+  onProcess?: (proc: ChildProcess | null) => void
+  onStderr?: (text: string) => void
+  outputPath?: string
+  startSeconds?: number
+  durationSeconds?: number
+}
+
+function createTempWavPath(prefix = 'irecord'): string {
+  return join(getTempDir(), `${prefix}-${randomUUID()}.wav`)
+}
+
+function ffmpegErrorMessage(stderr: string, fallback: string): string {
+  const lines = stderr.split('\n').map((line) => line.trim()).filter(Boolean)
+  const tail = lines.slice(-6).join('\n')
+  return tail ? `${fallback}: ${tail}` : fallback
 }
 
 /**
- * 获取音频/视频文件信息
+ * 将任意 ffmpeg 可解码输入统一转换为 16kHz mono pcm_s16le WAV。
  */
-export function getAudioInfo(filePath: string): Promise<AudioInfo> {
+export function convertToWav(inputPath: string, options: ConvertToWavOptions = {}): Promise<string> {
+  const outputPath = options.outputPath || createTempWavPath('irecord')
+  const args: string[] = ['-y']
+
+  if (typeof options.startSeconds === 'number') {
+    args.push('-ss', String(Math.max(0, options.startSeconds)))
+  }
+
+  args.push('-i', inputPath, '-vn')
+
+  if (typeof options.durationSeconds === 'number') {
+    args.push('-t', String(Math.max(0.01, options.durationSeconds)))
+  }
+
+  args.push('-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'wav', outputPath)
+
   return new Promise((resolve, reject) => {
-    // Ensure file path is properly encoded for ffprobe
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
-      if (err) {
-        console.error('FFprobe error for file:', filePath, err)
-        reject(new Error(`无法读取文件信息: ${err.message}`))
+    const proc = spawn(getFfmpegPath(), args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    options.onProcess?.(proc)
+
+    proc.stderr?.on('data', (chunk) => {
+      const text = chunk.toString()
+      stderr += text
+      options.onStderr?.(text)
+    })
+
+    proc.on('error', (err) => {
+      options.onProcess?.(null)
+      deleteTempFile(outputPath)
+      reject(new Error(`无法启动 FFmpeg: ${err.message}`))
+    })
+
+    proc.on('close', (code, signal) => {
+      options.onProcess?.(null)
+      if (code === 0) {
+        try {
+          readWavInfo(outputPath)
+          resolve(outputPath)
+        } catch (err) {
+          deleteTempFile(outputPath)
+          const message = err instanceof Error ? err.message : String(err)
+          reject(new Error(`WAV 转换结果无效: ${message}`))
+        }
         return
       }
 
-      const audioStream = metadata.streams.find(s => s.codec_type === 'audio')
-      if (!audioStream) {
-        reject(new Error('该文件不包含音频'))
+      deleteTempFile(outputPath)
+      if (signal) {
+        reject(new Error(`FFmpeg 被信号 ${signal} 终止`))
         return
       }
-
-      resolve({
-        duration: metadata.format.duration || 0,
-        format: metadata.format.format_name || 'unknown',
-        sampleRate: audioStream.sample_rate ? parseInt(String(audioStream.sample_rate)) : 0,
-        channels: audioStream.channels || 0,
-        bitRate: metadata.format.bit_rate ? parseInt(String(metadata.format.bit_rate)) : 0,
-        codec: audioStream.codec_name || 'unknown'
-      })
+      reject(new Error(ffmpegErrorMessage(stderr, `音频转换失败，退出码 ${code}`)))
     })
   })
 }
 
 /**
- * 将音频/视频文件转换为 16kHz 单声道 WAV
- * 返回临时 WAV 文件路径
+ * 通过固定 WAV 转换成功与否验证媒体，并从产物 WAV 头读取元数据。
  */
-export function convertToWav(inputPath: string): Promise<string> {
-  const outputPath = join(tmpdir(), `irecord-${randomUUID()}.wav`)
-
-  return new Promise((resolve, reject) => {
-    ffmpeg(inputPath)
-      .audioFrequency(16000)
-      .audioChannels(1)
-      .audioCodec('pcm_s16le')
-      .format('wav')
-      .on('end', () => resolve(outputPath))
-      .on('error', (err) => reject(new Error(`音频转换失败: ${err.message}`)))
-      .save(outputPath)
-  })
+export async function getAudioInfo(filePath: string): Promise<AudioInfo> {
+  let tempWavPath: string | null = null
+  try {
+    tempWavPath = await convertToWav(filePath)
+    const info: WavInfo = readWavInfo(tempWavPath)
+    return {
+      duration: info.duration,
+      format: info.format,
+      sampleRate: info.sampleRate,
+      channels: info.channels,
+      bitRate: info.bitRate,
+      codec: info.codec,
+    }
+  } finally {
+    if (tempWavPath) deleteTempFile(tempWavPath)
+  }
 }
 
 /**
- * 检查文件是否需要 FFmpeg 转换
- * 只有非 WAV 格式才需要转换，sherpa-onnx-node 内置重采样
+ * CLI 路线要求所有输入都先标准化成固定 WAV。
  */
-export async function needsConversion(filePath: string): Promise<boolean> {
-  const ext = filePath.toLowerCase()
-  // WAV 文件直接交给 sherpa-onnx-node 处理（内置重采样）
-  if (ext.endsWith('.wav')) {
-    return false
-  }
-  // 其他格式需要 FFmpeg 转换为 WAV
+export async function needsConversion(_filePath: string): Promise<boolean> {
   return true
+}
+
+export function getWavInfo(filePath: string): WavInfo {
+  return readWavInfo(filePath)
 }

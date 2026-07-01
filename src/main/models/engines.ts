@@ -1,5 +1,6 @@
 import { MODEL_REGISTRY } from './registry'
 import { getModelStatus } from './status'
+import { checkSherpaCliRuntime } from '../utils/paths'
 
 export interface EngineEntry {
   id: string
@@ -31,12 +32,13 @@ export interface EngineWithAvailability extends EngineEntry {
 }
 
 export function getEngineAvailability(): EngineWithAvailability[] {
+  const runtimeAvailable = checkSherpaCliRuntime().available
   return ENGINE_REGISTRY.map((engine) => {
     const available = engine.models.every((modelId) => {
       const entry = MODEL_REGISTRY.find((m) => m.id === modelId)
       if (!entry) return false
       return getModelStatus(entry).status === 'installed'
-    })
+    }) && runtimeAvailable
     return { ...engine, available }
   })
 }

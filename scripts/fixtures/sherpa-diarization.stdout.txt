@@ -1,0 +1,7 @@
+OfflineSpeakerDiarizationConfig(segmentation=OfflineSpeakerSegmentationModelConfig(...), clustering=FastClusteringConfig(num_clusters=-1, threshold=1.2))
+Started
+4.115 -- 7.456 speaker_00
+8.722 -- 46.488 speaker_00
+10.595 -- 10.932 speaker_01
+47.028 -- 92.590 speaker_00
+50.892 -- 51.449 speaker_01

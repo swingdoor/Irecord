@@ -22,7 +22,7 @@ const electronAPI = {
     ipcRenderer.invoke('diagnose-audio', filePath),
   selectFolder: (): Promise<{ path?: string; canceled?: boolean }> =>
     ipcRenderer.invoke('select-folder'),
-  checkResources: (): Promise<{ ffmpegExists: boolean; hasAnyModel: boolean }> =>
+  checkResources: (): Promise<{ ffmpegExists: boolean; sherpaCliRuntime?: any; hasAnyModel: boolean }> =>
     ipcRenderer.invoke('check-resources'),
 
   // ===== 任务管理 =====
@@ -60,7 +60,7 @@ const electronAPI = {
     ipcRenderer.invoke('get-llm-providers'),
 
   // ===== 模型管理 =====
-  getModelRegistry: (): Promise<{ models: any[]; offlineModels: any[]; auxiliaryModels: any[]; downloadPath: string; ffmpegExists: boolean; defaultModelPath: string; defaultFfmpegPath: string }> =>
+  getModelRegistry: (): Promise<{ models: any[]; offlineModels: any[]; auxiliaryModels: any[]; downloadPath: string; ffmpegExists: boolean; sherpaCliRuntime?: any; defaultModelPath: string; defaultFfmpegPath: string }> =>
     ipcRenderer.invoke('get-model-registry'),
   getEngineRegistry: (): Promise<Array<{ id: string; name: string; type: string; description: string; models: string[]; available: boolean }>> =>
     ipcRenderer.invoke('get-engine-registry'),

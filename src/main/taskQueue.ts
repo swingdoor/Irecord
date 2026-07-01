@@ -1,12 +1,11 @@
 import { BrowserWindow, app } from 'electron'
-import { spawn, ChildProcess } from 'child_process'
+import { ChildProcess } from 'child_process'
 import { join } from 'path'
-import { cpus } from 'os'
 import { createWriteStream, mkdirSync, existsSync, WriteStream } from 'fs'
 import { getNextPendingTask, hasProcessingTask, updateTask, saveResult, updateResultAnalysis } from './db/database'
-import { getQwen3AsrModelPath, getSenseVoiceModelPath, getVadModelPath, getSegmentationModelPath, getEmbeddingModelPath } from './utils/paths'
-import { convertToWav, needsConversion } from './audio/ffmpeg'
+import { convertToWav, getWavInfo } from './audio/ffmpeg'
 import { deleteTempFile } from './audio/temp'
+import { recognizeWithSherpaCli } from './engine/sherpaCli'
 import { callLLM } from './llm/client'
 import { getSummaryPrompt, getSpeakersPrompt, getMinutesPrompt, getQaPrompt } from './llm/prompts'
 import { getSettings, getAsrParams } from './utils/settings'
@@ -63,6 +62,7 @@ export function startQueue(win: BrowserWindow) {
   processNext(win)
 }
 
+
 async function processNext(win: BrowserWindow) {
   if (await hasProcessingTask()) return
 
@@ -88,108 +88,27 @@ async function processNext(win: BrowserWindow) {
   })
 
   try {
-    // 预处理
-    let wavPath = task.filePath
-    if (await needsConversion(task.filePath)) {
-      writeLog(logStream, 'preprocess', { action: 'convert-to-wav', source: task.filePath })
-      wavPath = await convertToWav(task.filePath)
-      tempWavPath = wavPath
-      writeLog(logStream, 'preprocess', { action: 'convert-done', wavPath })
-    } else {
-      writeLog(logStream, 'preprocess', { action: 'skip-conversion', wavPath })
-    }
+    writeLog(logStream, 'preprocess', { action: 'convert-to-normalized-wav', source: task.filePath })
+    win.webContents.send('task-progress', { taskId: task.id, stage: 'preprocess', percent: 5 })
+    const wavPath = await convertToWav(task.filePath, {
+      onProcess: (proc) => { currentProcess = proc },
+      onStderr: (text) => writeLog(logStream, 'ffmpeg-stderr', text.replace(/\n+$/, '')),
+    })
+    tempWavPath = wavPath
+    const wavInfo = getWavInfo(wavPath)
+    writeLog(logStream, 'preprocess', { action: 'convert-done', wavPath, wavInfo })
+    win.webContents.send('task-progress', { taskId: task.id, stage: 'preprocess', percent: 12 })
 
-    // 启动子进程
-    const scriptPath = app.isPackaged
-      ? join(process.resourcesPath, 'asr-process.js')
-      : join(__dirname, '../../src/main/engine/asr-process.js')
-
-    // 根据 modelType 选择模型路径
-    const modelDir = task.modelType === 'sensevoice-small'
-      ? getSenseVoiceModelPath()
-      : getQwen3AsrModelPath()
-
-    const argsObj = {
+    const result = await recognizeWithSherpaCli({
       wavPath,
-      modelDir,
       modelType: task.modelType || 'qwen3-asr',
-      vadModelPath: getVadModelPath(),
-      segmentationModelPath: getSegmentationModelPath(),
-      embeddingModelPath: getEmbeddingModelPath(),
-      numThreads: cpus().length,
+      strategy: getSettings().defaultStrategy === 'vad' ? 'vad' : 'speaker-diarization',
       asrParams: getAsrParams(),
-    }
-    const inputData = JSON.stringify(argsObj)
-    writeLog(logStream, 'spawn-args', argsObj)
-
-    const result = await new Promise<any>((resolve, reject) => {
-      // 打包后 node_modules 在 app.asar.unpacked 里，需要通过 NODE_PATH 和 cwd 让子进程找到
-      const spawnEnv = { ...process.env }
-      let spawnCwd: string | undefined
-      if (app.isPackaged) {
-        const unpackedModules = join(process.resourcesPath, 'app.asar.unpacked', 'node_modules')
-        spawnEnv.NODE_PATH = unpackedModules
-        spawnCwd = join(process.resourcesPath, 'app.asar.unpacked')
-      }
-      writeLog(logStream, 'spawn', { scriptPath, cwd: spawnCwd, isPackaged: app.isPackaged })
-
-      currentProcess = spawn('node', [scriptPath], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: spawnEnv,
-        cwd: spawnCwd,
-      })
-
-      let stdout = ''
-      let stderr = ''
-
-      currentProcess.stdout?.on('data', (chunk) => {
-        stdout += chunk.toString()
-        const lines = stdout.split('\n')
-        stdout = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const msg = JSON.parse(line)
-            writeLog(logStream, 'stdout-msg', { type: msg.type, stage: msg.stage, percent: msg.percent, hasText: !!msg.text, segCount: Array.isArray(msg.segments) ? msg.segments.length : undefined, message: msg.message })
-            if (msg.type === 'progress') {
-              win.webContents.send('task-progress', { taskId: task.id, stage: msg.stage, percent: msg.percent })
-            } else if (msg.type === 'result') {
-              resolve(msg)
-            } else if (msg.type === 'error') {
-              reject(new Error(msg.message))
-            }
-          } catch (e: any) {
-            // 关键诊断点：解析失败的 stdout 行原样落盘，便于定位 "Bad control character" 之类的源头
-            writeLog(logStream, 'stdout-parse-fail', {
-              error: e?.message,
-              lineLength: line.length,
-              linePreview: line.slice(0, 200),
-              lineTail: line.length > 200 ? line.slice(-100) : undefined,
-            })
-          }
-        }
-      })
-
-      currentProcess.stderr?.on('data', (chunk) => {
-        const text = chunk.toString()
-        stderr += text
-        writeLog(logStream, 'stderr', text.replace(/\n+$/, ''))
-      })
-      currentProcess.on('close', (code, signal) => {
-        currentProcess = null
-        writeLog(logStream, 'close', { code, signal, stdoutTail: stdout.slice(-200), stderrLength: stderr.length })
-        if (canceledFlag) return // 主动取消，不报错
-        if (code !== 0) reject(new Error(stderr || `子进程退出，代码: ${code}`))
-      })
-      currentProcess.on('error', (err) => {
-        currentProcess = null
-        writeLog(logStream, 'spawn-error', { message: err.message, stack: err.stack })
-        reject(err)
-      })
-
-      currentProcess.stdin?.write(inputData)
-      currentProcess.stdin?.end()
+      onProcess: (proc) => { currentProcess = proc },
+      onProgress: (stage, percent) => {
+        win.webContents.send('task-progress', { taskId: task.id, stage, percent })
+      },
+      writeLog: (tag, payload) => writeLog(logStream, tag, payload),
     })
 
     writeLog(logStream, 'recognize-done', { strategy: result.strategy, textLength: (result.text || '').length, segCount: Array.isArray(result.segments) ? result.segments.length : 0 })

@@ -2,7 +2,7 @@ import { app, ipcMain } from 'electron'
 import { join } from 'path'
 import { writeFileSync } from 'fs'
 import { getSettings, invalidateSettingsCache } from '../utils/settings'
-import { getAvailableModels, checkFfmpegExists, checkQwen3AsrModelExists, checkSenseVoiceModelExists, getUserModelsPath, getResourcePath } from '../utils/paths'
+import { getAvailableModels, checkFfmpegExists, checkQwen3AsrModelExists, checkSenseVoiceModelExists, getUserModelsPath, getResourcePath, checkSherpaCliRuntime } from '../utils/paths'
 import { getProviderList } from '../llm/providers'
 import { getFullRegistry, downloadModel, cancelDownload, deleteModel } from '../models/downloader'
 import { getEngineAvailability, getOfflineModels, getAuxiliaryModels } from '../models/engines'
@@ -39,6 +39,7 @@ export function registerSettingsHandlers(): void {
   ipcMain.handle('check-resources', () => {
     return {
       ffmpegExists: checkFfmpegExists(),
+      sherpaCliRuntime: checkSherpaCliRuntime(),
       hasAnyModel: checkQwen3AsrModelExists() || checkSenseVoiceModelExists(),
     }
   })
@@ -59,6 +60,7 @@ export function registerSettingsHandlers(): void {
       auxiliaryModels,
       downloadPath: getUserModelsPath(),
       ffmpegExists: checkFfmpegExists(),
+      sherpaCliRuntime: checkSherpaCliRuntime(),
       defaultModelPath: getResourcePath('models'),
       defaultFfmpegPath: getResourcePath('ffmpeg'),
     }

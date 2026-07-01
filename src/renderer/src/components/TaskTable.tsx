@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Table, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Modal, Progress, message } from 'antd'
+import { Table, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col, Modal, message } from 'antd'
 import {
   EllipsisOutlined, LoadingOutlined, PlayCircleOutlined,
   CloseOutlined, DownloadOutlined, DeleteOutlined,
@@ -211,15 +211,6 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
       render: (status: string, record: Task) => (
         <Space size={4}>
           <StatusTag status={status} themeMode={themeMode} progress={taskProgress[record.id]} />
-          {status === 'processing' && taskProgress[record.id] && (
-            <Progress
-              percent={taskProgress[record.id].percent}
-              size="small"
-              showInfo={false}
-              strokeColor={themeMode === 'default' ? '#1677ff' : '#18181b'}
-              style={{ width: 80, margin: 0 }}
-            />
-          )}
         </Space>
       ),
     },
@@ -291,15 +282,6 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Text strong ellipsis style={{ fontSize: 14, flex: 1, minWidth: 0 }}>{task.fileName}</Text>
                     <StatusTag status={task.status} themeMode={themeMode} progress={taskProgress[task.id]} />
-                    {task.status === 'processing' && taskProgress[task.id] && (
-                      <Progress
-                        percent={taskProgress[task.id].percent}
-                        size="small"
-                        showInfo={false}
-                        strokeColor={themeMode === 'default' ? '#1677ff' : '#18181b'}
-                        style={{ width: 60, margin: 0 }}
-                      />
-                    )}
                   </div>
                   <Dropdown menu={{ items: getMenuItems(task), onClick: (e) => handleMenuClick(task, e.key, e) }} trigger={['click']}>
                     <Button type="text" size="small" icon={<EllipsisOutlined />} onClick={e => e.stopPropagation()} />

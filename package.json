@@ -7,9 +7,13 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit",
-    "build:win": "npm run build && electron-builder --win --x64",
-    "build:win:portable": "npm run build && electron-builder --dir && node -e \"const v=require('./package.json').version,fs=require('fs'),p='release/'+v;fs.existsSync(p+'/win-unpacked')&&fs.renameSync(p+'/win-unpacked',p+'/iRecord-'+v+'-win-x64')\""
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "clean": "rm -rf dist release",
+    "build:mac": "npm run build && electron-builder --mac --arm64",
+    "build:mac:clean": "npm run clean && npm run build:mac",
+    "build:win": "npm run build && electron-builder --win --x64"
   },
   "build": {
     "appId": "com.irecord.app",
@@ -23,7 +27,23 @@
     "win": {
       "target": "nsis",
       "icon": "icon.ico",
-      "requestedExecutionLevel": "asInvoker"
+      "requestedExecutionLevel": "asInvoker",
+      "files": [
+        "!resources${/*}"
+      ]
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": "arm64"
+        }
+      ],
+      "icon": "icon.icns",
+      "category": "public.app-category.productivity",
+      "files": [
+        "!resources${/*}"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -31,20 +51,40 @@
     },
     "files": [
       "dist/**/*",
-      "!resources/**/*"
+      "!node_modules/antd/**",
+      "!node_modules/@ant-design/**",
+      "!node_modules/@rc-component/**",
+      "!node_modules/rc-*/**",
+      "!node_modules/lucide-react/**",
+      "!node_modules/react-dom/**",
+      "!node_modules/react/**",
+      "!node_modules/@tiptap/**",
+      "!node_modules/prosemirror-*/**",
+      "!node_modules/@floating-ui/**",
+      "!node_modules/wavesurfer.js/**",
+      "!node_modules/@babel/**",
+      "!node_modules/micromark*/**",
+      "!node_modules/@codemirror/**",
+      "!node_modules/highlight.js/**",
+      "!node_modules/@tailwindcss/**",
+      "!node_modules/tailwindcss/**"
     ],
     "extraResources": [
-      {
-        "from": "src/main/engine/asr-process.js",
-        "to": "asr-process.js"
-      },
       {
         "from": "src/main/keywords/extract.js",
         "to": "extract.js"
       },
       {
         "from": "resources/ffmpeg",
-        "to": "resources/ffmpeg"
+        "to": "resources/ffmpeg",
+        "filter": [
+          "ffmpeg",
+          "ffmpeg.exe"
+        ]
+      },
+      {
+        "from": "resources/runtimes/sherpa-onnx",
+        "to": "resources/runtimes/sherpa-onnx"
       },
       {
         "from": "resources/models/silero-vad",
@@ -61,7 +101,7 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "node_modules/sherpa-onnx-node/**",
+      "node_modules/fft.js/**",
       "node_modules/nodejieba/**",
       "node_modules/sql.js/**"
     ]
@@ -91,6 +131,7 @@
     "@tiptap/react": "^3.22.4",
     "@tiptap/starter-kit": "^3.22.4",
     "antd": "^6.3.6",
+    "fft.js": "^4.0.4",
     "fluent-ffmpeg": "^2.1.3",
     "lucide-react": "^1.8.0",
     "nodejieba": "^3.5.8",
@@ -98,7 +139,6 @@
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "sherpa-onnx-node": "^1.12.38",
     "sql.js": "^1.14.1",
     "tar": "^7.5.15",
     "unbzip2-stream": "^1.4.3",

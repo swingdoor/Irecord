@@ -3,20 +3,22 @@ import { join } from 'path'
 import { existsSync, readFileSync } from 'fs'
 
 export interface AsrParams {
-  clusteringThreshold: number
   vadThreshold: number
   minSilenceDuration: number
   minSpeechDuration: number
-  maxSegmentDuration: number
   maxDurationSeconds: number
-  minDurationOn: number
-  minDurationOff: number
-  trimmedMinDuration: number
+  vadMaxSpeechDuration: number
+  speakerClusterThreshold: number
+  diarizationDistanceThreshold: number
   sameSpeakerMergeGap: number
-  displayMergeGap: number
   minSampleLength: number
   qwen3MaxTotalLen: number
   qwen3MaxNewTokens: number
+  cliNumThreads: number
+  asrBatchSize: number
+  senseVoiceLanguage: string
+  minAsrSegmentDuration: number
+  maxAsrSegmentDuration: number
 }
 
 export interface AppSettings {
@@ -35,20 +37,22 @@ export interface AppSettings {
 }
 
 export const ASR_DEFAULTS: AsrParams = {
-  clusteringThreshold: 0.85,
   vadThreshold: 0.5,
   minSilenceDuration: 1.5,
   minSpeechDuration: 1.0,
-  maxSegmentDuration: 60.0,
   maxDurationSeconds: 7200,
-  minDurationOn: 1.0,
-  minDurationOff: 1.0,
-  trimmedMinDuration: 0.5,
+  vadMaxSpeechDuration: 60,
+  speakerClusterThreshold: 0.5,
+  diarizationDistanceThreshold: 1.2,
   sameSpeakerMergeGap: 2.0,
-  displayMergeGap: 0.5,
   minSampleLength: 1600,
   qwen3MaxTotalLen: 4096,
   qwen3MaxNewTokens: 1024,
+  cliNumThreads: 4,
+  asrBatchSize: 2,
+  senseVoiceLanguage: 'zh',
+  minAsrSegmentDuration: 0.8,
+  maxAsrSegmentDuration: 60,
 }
 
 let settingsCache: AppSettings | null = null

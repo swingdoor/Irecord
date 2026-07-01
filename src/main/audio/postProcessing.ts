@@ -2,11 +2,10 @@ import { join, dirname, basename, extname } from 'path'
 import { existsSync, unlinkSync, statSync } from 'fs'
 import { randomUUID } from 'crypto'
 import ffmpeg from 'fluent-ffmpeg'
-import { getFfmpegPath, getFfprobePath } from '../utils/paths'
+import { getFfmpegPath } from '../utils/paths'
 
 // Set ffmpeg paths
 ffmpeg.setFfmpegPath(getFfmpegPath())
-ffmpeg.setFfprobePath(getFfprobePath())
 
 export interface PostProcessingOptions {
   denoise: boolean

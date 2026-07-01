@@ -12,14 +12,16 @@ function App() {
   const [themeMode, setThemeMode] = useState<'default' | 'monochrome'>('default')
 
   useEffect(() => {
-    window.electronAPI.getSettings().then(settings => {
+    window.electronAPI.getSettings().then((settings: Record<string, any>) => {
       setThemeMode(settings.themeMode || 'default')
     })
 
-    window.electronAPI.checkResources().then(({ ffmpegExists, hasAnyModel }) => {
-      if (!ffmpegExists || !hasAnyModel) {
+    window.electronAPI.checkResources().then((resources: { ffmpegExists: boolean; sherpaCliRuntime?: any; hasAnyModel: boolean }) => {
+      const { ffmpegExists, sherpaCliRuntime, hasAnyModel } = resources
+      if (!ffmpegExists || !sherpaCliRuntime?.available || !hasAnyModel) {
         const missing = [
           !ffmpegExists ? 'FFmpeg' : null,
+          !sherpaCliRuntime?.available ? 'Sherpa CLI' : null,
           !hasAnyModel ? '至少一个模型' : null,
         ].filter(Boolean).join(' 和 ')
 

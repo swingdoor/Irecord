@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
-import { Table, Button, Dropdown, message, Modal, Space, Empty, Card, Row, Col, Typography, Tag, Progress } from 'antd'
+import { Table, Button, Dropdown, message, Modal, Space, Empty, Card, Row, Col, Typography, Tag } from 'antd'
 import {
   EllipsisOutlined, DownloadOutlined, DeleteOutlined, ExperimentOutlined, FileTextOutlined,
   LoadingOutlined,
@@ -282,15 +282,6 @@ export function RealtimeRecordingTable({
         return (
           <Space size={4}>
             <StatusTag status={status} themeMode={themeMode} progress={task ? taskProgress[task.id] : undefined} />
-            {status === 'processing' && task && taskProgress[task.id] && (
-              <Progress
-                percent={taskProgress[task.id].percent}
-                size="small"
-                showInfo={false}
-                strokeColor={themeMode === 'default' ? '#1677ff' : '#18181b'}
-                style={{ width: 80, margin: 0 }}
-              />
-            )}
           </Space>
         )
       },
@@ -383,15 +374,6 @@ export function RealtimeRecordingTable({
                     <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Text strong ellipsis style={{ fontSize: 14, flex: 1, minWidth: 0 }}>{recording.title}</Text>
                       <StatusTag status={status} themeMode={themeMode} progress={task ? taskProgress[task.id] : undefined} />
-                      {status === 'processing' && task && taskProgress[task.id] && (
-                        <Progress
-                          percent={taskProgress[task.id].percent}
-                          size="small"
-                          showInfo={false}
-                          strokeColor={themeMode === 'default' ? '#1677ff' : '#18181b'}
-                          style={{ width: 60, margin: 0 }}
-                        />
-                      )}
                     </div>
                     <Dropdown
                       menu={{

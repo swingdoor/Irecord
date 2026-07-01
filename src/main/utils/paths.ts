@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { constants, existsSync, accessSync } from 'fs'
 import { getSettings } from './settings'
 import { MODEL_REGISTRY, type ModelEntry } from '../models/registry'
 
@@ -61,14 +61,22 @@ export function getModelsPath(): string {
 }
 
 /**
+ * 按平台返回可执行文件名：Windows 带 .exe，macOS/Linux 无后缀
+ */
+function binaryName(base: 'ffmpeg' | 'ffprobe'): string {
+  return process.platform === 'win32' ? `${base}.exe` : base
+}
+
+/**
  * 获取 ffmpeg 路径（优先用户配置，fallback 内置路径）
  */
 export function getFfmpegPath(): string {
   const settings = getSettings()
-  if (settings.ffmpegDir && existsSync(join(settings.ffmpegDir, 'ffmpeg.exe'))) {
-    return join(settings.ffmpegDir, 'ffmpeg.exe')
+  const name = binaryName('ffmpeg')
+  if (settings.ffmpegDir && existsSync(join(settings.ffmpegDir, name))) {
+    return join(settings.ffmpegDir, name)
   }
-  return getResourcePath('ffmpeg', 'ffmpeg.exe')
+  return getResourcePath('ffmpeg', name)
 }
 
 /**
@@ -76,10 +84,95 @@ export function getFfmpegPath(): string {
  */
 export function getFfprobePath(): string {
   const settings = getSettings()
-  if (settings.ffmpegDir && existsSync(join(settings.ffmpegDir, 'ffprobe.exe'))) {
-    return join(settings.ffmpegDir, 'ffprobe.exe')
+  const name = binaryName('ffprobe')
+  if (settings.ffmpegDir && existsSync(join(settings.ffmpegDir, name))) {
+    return join(settings.ffmpegDir, name)
   }
-  return getResourcePath('ffmpeg', 'ffprobe.exe')
+  return getResourcePath('ffmpeg', name)
+}
+
+export type SherpaCliKind = 'offline' | 'diarization' | 'vad'
+
+export interface SherpaCliRuntimeStatus {
+  available: boolean
+  platformKey: string
+  runtimeDir: string
+  offlinePath: string
+  diarizationPath: string
+  vadPath: string
+  missing: Array<{ kind: SherpaCliKind; path: string; reason: 'missing' | 'not-executable' }>
+}
+
+type SherpaCliMissingEntry = SherpaCliRuntimeStatus['missing'][number]
+
+function getSherpaCliPlatformKey(): string {
+  return `${process.platform}-${process.arch}`
+}
+
+function sherpaCliBinaryName(kind: SherpaCliKind): string {
+  const base = kind === 'offline'
+    ? 'sherpa-onnx-offline'
+    : kind === 'diarization'
+      ? 'sherpa-onnx-offline-speaker-diarization'
+      : 'sherpa-onnx-vad'
+  return process.platform === 'win32' ? `${base}.exe` : base
+}
+
+function isExecutableFile(path: string): boolean {
+  if (!existsSync(path)) return false
+  if (process.platform === 'win32') return true
+  try {
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 获取平台对应的 Sherpa-ONNX CLI 运行时目录。
+ */
+export function getSherpaCliRuntimeDir(): string {
+  return getResourcePath('runtimes', 'sherpa-onnx', getSherpaCliPlatformKey())
+}
+
+/**
+ * 获取 Sherpa-ONNX CLI 可执行文件路径。
+ */
+export function getSherpaCliPath(kind: SherpaCliKind): string {
+  return join(getSherpaCliRuntimeDir(), sherpaCliBinaryName(kind))
+}
+
+/**
+ * 检查 Sherpa-ONNX CLI 运行时是否完整。
+ */
+export function checkSherpaCliRuntime(): SherpaCliRuntimeStatus {
+  const offlinePath = getSherpaCliPath('offline')
+  const diarizationPath = getSherpaCliPath('diarization')
+  const vadPath = getSherpaCliPath('vad')
+  const entries: Array<{ kind: SherpaCliKind; path: string }> = [
+    { kind: 'offline', path: offlinePath },
+    { kind: 'diarization', path: diarizationPath },
+    { kind: 'vad', path: vadPath },
+  ]
+  const missing: SherpaCliMissingEntry[] = []
+  for (const { kind, path } of entries) {
+    if (!existsSync(path)) {
+      missing.push({ kind, path, reason: 'missing' })
+    } else if (!isExecutableFile(path)) {
+      missing.push({ kind, path, reason: 'not-executable' })
+    }
+  }
+
+  return {
+    available: missing.length === 0,
+    platformKey: getSherpaCliPlatformKey(),
+    runtimeDir: getSherpaCliRuntimeDir(),
+    offlinePath,
+    diarizationPath,
+    vadPath,
+    missing,
+  }
 }
 
 /**
@@ -173,7 +266,7 @@ export function checkDiarizationModelsExist(): boolean {
  * 检查 FFmpeg 是否存在
  */
 export function checkFfmpegExists(): boolean {
-  return existsSync(getFfmpegPath()) && existsSync(getFfprobePath())
+  return existsSync(getFfmpegPath())
 }
 
 export interface ModelInfo {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Modal, Tabs, Form, Select, Input, InputNumber, Switch, Typography, Button, Space, Progress, Tag, message, Tooltip } from 'antd'
+import { Modal, Tabs, Form, Select, Input, InputNumber, Switch, Typography, Button, Space, Progress, Tag, message, Tooltip, Radio } from 'antd'
 import { DownloadOutlined, DeleteOutlined, CloseCircleOutlined, CheckCircleFilled, QuestionCircleOutlined, PlusOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
@@ -42,11 +42,13 @@ interface SettingsModalProps {
 }
 
 const strategyOptions = [
-  { value: 'auto', label: '自动选择（推荐）' },
-  { value: 'speaker-diarization', label: '说话人分离' },
-  { value: 'vad', label: 'VAD 分段' },
-  { value: 'plain', label: '整体识别' },
+  { value: 'speaker-diarization', label: '分离说话人' },
+  { value: 'vad', label: '不分离说话人' },
 ]
+
+function normalizeStrategy(strategy?: string): string {
+  return strategy === 'vad' ? 'vad' : 'speaker-diarization'
+}
 
 function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -116,17 +118,20 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
   const [engines, setEngines] = useState<Array<{ id: string; name: string; type: string; description: string; models: string[]; available: boolean }>>([])
   const [downloadPath, setDownloadPath] = useState('')
   const [ffmpegExists, setFfmpegExists] = useState(true)
+  const [sherpaCliRuntime, setSherpaCliRuntime] = useState<any>(null)
   const [defaultModelPath, setDefaultModelPath] = useState('')
   const [defaultFfmpegPath, setDefaultFfmpegPath] = useState('')
   const [downloadProgress, setDownloadProgress] = useState<Record<string, { percent: number; downloadedBytes: number; totalBytes: number }>>({})
 
   const refreshModelRegistry = () => {
-    window.electronAPI.getModelRegistry().then(({ models, offlineModels: ol, auxiliaryModels: aux, downloadPath: dp, ffmpegExists: fe, defaultModelPath: dmp, defaultFfmpegPath: dfp }) => {
+    window.electronAPI.getModelRegistry().then((registry: { models: any[]; offlineModels: ModelRegistryEntry[]; auxiliaryModels: ModelRegistryEntry[]; downloadPath: string; ffmpegExists: boolean; sherpaCliRuntime?: any; defaultModelPath: string; defaultFfmpegPath: string }) => {
+      const { models, offlineModels: ol, auxiliaryModels: aux, downloadPath: dp, ffmpegExists: fe, sherpaCliRuntime: rt, defaultModelPath: dmp, defaultFfmpegPath: dfp } = registry
       setModelRegistry(models)
       setOfflineModels(ol)
       setAuxiliaryModels(aux)
       setDownloadPath(dp)
       setFfmpegExists(fe)
+      setSherpaCliRuntime(rt || null)
       setDefaultModelPath(dmp)
       setDefaultFfmpegPath(dfp)
     })
@@ -169,15 +174,21 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
 
         form.setFieldsValue({
           defaultModel: settings.defaultModel || availableModels.find(m => m.available)?.id || 'qwen3-asr',
-          defaultStrategy: settings.defaultStrategy || 'auto',
+          defaultStrategy: normalizeStrategy(settings.defaultStrategy),
           llmProvider: provider,
           llmModel: settings.llmModel || (providerInfo?.models[0]?.id || ''),
           llmApiKey: keys[provider] || '',
-          clusteringThreshold: asrParams.clusteringThreshold ?? 0.85,
+          diarizationDistanceThreshold: asrParams.diarizationDistanceThreshold ?? 1.2,
+          cliNumThreads: asrParams.cliNumThreads ?? 4,
+          asrBatchSize: asrParams.asrBatchSize ?? 2,
+          senseVoiceLanguage: asrParams.senseVoiceLanguage ?? 'zh',
+          minAsrSegmentDuration: asrParams.minAsrSegmentDuration ?? 0.8,
+          maxAsrSegmentDuration: asrParams.maxAsrSegmentDuration ?? 60,
+          speakerClusterThreshold: asrParams.speakerClusterThreshold ?? 0.5,
           vadThreshold: asrParams.vadThreshold ?? 0.5,
           minSilenceDuration: asrParams.minSilenceDuration ?? 1.5,
           minSpeechDuration: asrParams.minSpeechDuration ?? 1.0,
-          maxSegmentDuration: asrParams.maxSegmentDuration ?? 60,
+          vadMaxSpeechDuration: asrParams.vadMaxSpeechDuration ?? 60,
           maxDurationSeconds: asrParams.maxDurationSeconds ?? 7200,
           debugAsrLog: settings.debugAsrLog ?? false,
         })
@@ -189,7 +200,7 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
 
   // Listen for download progress
   useEffect(() => {
-    const unsubProgress = window.electronAPI.onModelDownloadProgress((data) => {
+    const unsubProgress = window.electronAPI.onModelDownloadProgress((data: { modelId: string; percent: number; downloadedBytes: number; totalBytes: number }) => {
       if (data.percent === -1) {
         // -1 signals retrying, show as 0% with "retrying" indicator
         setDownloadProgress(prev => ({ ...prev, [data.modelId]: { percent: 0, downloadedBytes: 0, totalBytes: data.totalBytes } }))
@@ -197,7 +208,7 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
         setDownloadProgress(prev => ({ ...prev, [data.modelId]: { percent: data.percent, downloadedBytes: data.downloadedBytes, totalBytes: data.totalBytes } }))
       }
     })
-    const unsubComplete = window.electronAPI.onModelDownloadComplete((data) => {
+    const unsubComplete = window.electronAPI.onModelDownloadComplete((data: { modelId: string; success: boolean; error?: string }) => {
       setDownloadProgress(prev => {
         const next = { ...prev }
         delete next[data.modelId]
@@ -311,11 +322,17 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
       llmCustomModels: customModels,
       debugAsrLog: values.debugAsrLog ?? false,
       asrParams: {
-        clusteringThreshold: values.clusteringThreshold,
+        speakerClusterThreshold: values.speakerClusterThreshold,
+        diarizationDistanceThreshold: values.diarizationDistanceThreshold,
+        cliNumThreads: values.cliNumThreads,
+        asrBatchSize: values.asrBatchSize,
+        senseVoiceLanguage: values.senseVoiceLanguage,
+        minAsrSegmentDuration: values.minAsrSegmentDuration,
+        maxAsrSegmentDuration: values.maxAsrSegmentDuration,
         vadThreshold: values.vadThreshold,
         minSilenceDuration: values.minSilenceDuration,
         minSpeechDuration: values.minSpeechDuration,
-        maxSegmentDuration: values.maxSegmentDuration,
+        vadMaxSpeechDuration: values.vadMaxSpeechDuration,
         maxDurationSeconds: values.maxDurationSeconds,
       }
     }
@@ -351,7 +368,7 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
       confirmLoading={loading}
       okText="保存"
       cancelText="取消"
-      width={600}
+      width={720}
       destroyOnClose
       styles={{ body: { minHeight: 420 } }}
     >
@@ -362,6 +379,18 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
             label: '模型管理',
             children: (
               <div style={{ marginTop: 8 }}>
+                <Text strong style={{ fontSize: 13 }}>运行资源</Text>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, marginBottom: 16 }}>
+                  <Tag color={ffmpegExists ? 'green' : 'red'} style={{ margin: 0 }}>
+                    {ffmpegExists ? <CheckCircleFilled /> : <CloseCircleOutlined />} FFmpeg
+                  </Tag>
+                  <Tag color={sherpaCliRuntime?.available ? 'green' : 'red'} style={{ margin: 0 }}>
+                    {sherpaCliRuntime?.available ? <CheckCircleFilled /> : <CloseCircleOutlined />} Sherpa CLI
+                  </Tag>
+                  {sherpaCliRuntime?.platformKey && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>{sherpaCliRuntime.platformKey}</Text>
+                  )}
+                </div>
                 <Text strong style={{ fontSize: 13 }}>文件转写模型</Text>
                 <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, marginTop: 8, marginBottom: 16 }}>
                   {offlineModels.map(m => (
@@ -398,13 +427,76 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
             key: 'file-recognition',
             label: '文件识别',
             children: (
-              <Form form={form} layout="horizontal" labelCol={{ span: 5 }} wrapperCol={{ span: 17 }} style={{ marginTop: 16 }}>
+              <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
                 <style>{`
-                  .ant-form-item { margin-bottom: 12px; }
+                  .file-recognition-settings {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 14px;
+                  }
+                  .settings-section {
+                    border-top: 1px solid #f0f0f0;
+                    padding-top: 10px;
+                  }
+                  .settings-section:first-of-type {
+                    border-top: 0;
+                    padding-top: 0;
+                  }
+                  .settings-section-title {
+                    color: rgba(0, 0, 0, 0.88);
+                    font-size: 13px;
+                    font-weight: 600;
+                    margin-bottom: 8px;
+                  }
+                  .settings-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    column-gap: 16px;
+                    row-gap: 8px;
+                  }
+                  .settings-grid .ant-form-item {
+                    margin-bottom: 0;
+                    min-width: 0;
+                  }
+                  .settings-grid .ant-form-item-row {
+                    display: flex;
+                    flex-direction: row !important;
+                    align-items: center;
+                    flex-wrap: nowrap;
+                    column-gap: 8px;
+                  }
+                  .settings-grid .ant-form-item-label {
+                    padding: 0;
+                    flex: 0 0 auto;
+                    text-align: left;
+                  }
+                  .settings-grid .ant-form-item-label > label {
+                    height: auto;
+                    font-size: 12px;
+                    white-space: nowrap;
+                  }
+                  .settings-grid .ant-form-item-control {
+                    flex: 0 0 auto;
+                    width: fit-content;
+                    min-width: 0;
+                  }
+                  .settings-grid .ant-form-item-control-input {
+                    min-height: 0;
+                  }
+                  .settings-grid .ant-select {
+                    width: 164px;
+                  }
+                  .settings-grid .ant-radio-group {
+                    white-space: nowrap;
+                  }
+                  .settings-grid .ant-input-number {
+                    width: 88px;
+                  }
                   .input-wrapper {
                     display: flex;
                     align-items: center;
                     gap: 8px;
+                    width: 128px;
                   }
                   .input-wrapper .ant-select,
                   .input-wrapper .ant-input-number {
@@ -427,113 +519,230 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                     cursor: help;
                     font-size: 14px;
                   }
+                  @media (max-width: 620px) {
+                    .settings-grid {
+                      grid-template-columns: 1fr;
+                    }
+                    .settings-grid .ant-form-item-label {
+                      width: 92px;
+                    }
+                  }
                 `}</style>
-                <Form.Item label="默认模型" name="defaultModel">
-                  <Select
-                    options={offlineModelOptions}
-                    onSelect={(value) => {
-                      const opt = offlineModelOptions.find(o => o.value === value)
-                      if (opt?.disabled) {
-                        message.info('该模型未下载，请前往"模型管理"下载后使用')
-                      }
-                    }}
-                  />
-                </Form.Item>
-                <Form.Item label="默认策略" name="defaultStrategy">
-                  <Select options={strategyOptions} />
-                </Form.Item>
-                <Form.Item
-                  label={
-                    <span className="label-with-tooltip">
-                      聚类阈值
-                      <Tooltip title="值越高识别出的说话人越少（默认 0.85）">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </span>
-                  }
-                  name="clusteringThreshold"
-                >
-                  <InputNumberWithUnit min={0.1} max={1.0} step={0.05} />
-                </Form.Item>
-                <Form.Item
-                  label={
-                    <span className="label-with-tooltip">
-                      VAD 阈值
-                      <Tooltip title="语音活动检测灵敏度，值越高越严格（默认 0.5）">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </span>
-                  }
-                  name="vadThreshold"
-                >
-                  <InputNumberWithUnit min={0.1} max={1.0} step={0.05} />
-                </Form.Item>
-                <Form.Item
-                  label={
-                    <span className="label-with-tooltip">
-                      最短静音
-                      <Tooltip title="值越大分段越少（默认 1.5）">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </span>
-                  }
-                  name="minSilenceDuration"
-                >
-                  <InputNumberWithUnit min={0.5} max={5.0} step={0.1} unit="秒" />
-                </Form.Item>
-                <Form.Item
-                  label={
-                    <span className="label-with-tooltip">
-                      最短语音
-                      <Tooltip title="过短的片段会被过滤（默认 1.0）">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </span>
-                  }
-                  name="minSpeechDuration"
-                >
-                  <InputNumberWithUnit min={0.5} max={5.0} step={0.1} unit="秒" />
-                </Form.Item>
-                <Form.Item
-                  label={
-                    <span className="label-with-tooltip">
-                      最长分段
-                      <Tooltip title="超长语音段会被强制切分（默认 60）">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </span>
-                  }
-                  name="maxSegmentDuration"
-                >
-                  <InputNumberWithUnit min={10} max={120} step={5} unit="秒" />
-                </Form.Item>
-                <Form.Item
-                  label={
-                    <span className="label-with-tooltip">
-                      最大时长
-                      <Tooltip title="超出会被拒绝（默认 7200 = 2小时）">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </span>
-                  }
-                  name="maxDurationSeconds"
-                >
-                  <InputNumberWithUnit min={600} max={14400} step={600} unit="秒" />
-                </Form.Item>
-                <Form.Item
-                  label={
-                    <span className="label-with-tooltip">
-                      诊断日志
-                      <Tooltip title="开启后，文件识别过程会写入诊断日志到用户数据目录的 logs 文件夹，用于排查识别报错。正式使用可关闭。">
-                        <QuestionCircleOutlined />
-                      </Tooltip>
-                    </span>
-                  }
-                  name="debugAsrLog"
-                  valuePropName="checked"
-                >
-                  <Switch />
-                </Form.Item>
+                <div className="file-recognition-settings">
+                  <div className="settings-section">
+                    <div className="settings-section-title">通用</div>
+                    <div className="settings-grid">
+                      <Form.Item label="默认模型" name="defaultModel">
+                        <Select
+                          options={offlineModelOptions}
+                          onSelect={(value) => {
+                            const opt = offlineModelOptions.find(o => o.value === value)
+                            if (opt?.disabled) {
+                              message.info('该模型未下载，请前往"模型管理"下载后使用')
+                            }
+                          }}
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            模式选择
+                            <Tooltip title="分离说话人：推荐用于多人对话，会输出说话人；不分离说话人：快速，仅做人声检测分段。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="defaultStrategy"
+                      >
+                        <Radio.Group options={strategyOptions} optionType="button" buttonStyle="solid" size="small" />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            CLI 线程
+                            <Tooltip title="默认 4；增大可能更快，也可能占用更多 CPU。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="cliNumThreads"
+                      >
+                        <InputNumberWithUnit min={1} max={32} step={1} />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            最大时长
+                            <Tooltip title="超出会被拒绝（默认 7200 = 2小时）">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="maxDurationSeconds"
+                      >
+                        <InputNumberWithUnit min={600} max={14400} step={600} unit="秒" />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div className="settings-section">
+                    <div className="settings-section-title">语音转写</div>
+                    <div className="settings-grid">
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            识别语言
+                            <Tooltip title="SenseVoice CLI 每次只能指定一种语言；中文场景默认 zh，可减少短片段误判成日文/韩文。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="senseVoiceLanguage"
+                      >
+                        <Select
+                          options={[
+                            { value: 'zh', label: '中文（推荐）' },
+                            { value: 'auto', label: '自动' },
+                            { value: 'en', label: '英文' },
+                            { value: 'yue', label: '粤语' },
+                            { value: 'ja', label: '日文' },
+                            { value: 'ko', label: '韩文' },
+                          ]}
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            ASR 批次
+                            <Tooltip title="每次投喂给 Sherpa CLI 的音频段数量；默认 2，最高 4。越大越快，但内存占用更高。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="asrBatchSize"
+                      >
+                        <InputNumberWithUnit min={1} max={4} step={1} />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            最短识别
+                            <Tooltip title="片段短于该时长时不送 ASR，默认 0.8 秒。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="minAsrSegmentDuration"
+                      >
+                        <InputNumberWithUnit min={0.1} max={5.0} step={0.1} unit="秒" />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            ASR 片长
+                            <Tooltip title="送入 ASR 的单片最长时长，超过会按时长均分；默认 60 秒。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="maxAsrSegmentDuration"
+                      >
+                        <InputNumberWithUnit min={10} max={300} step={10} unit="秒" />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div className="settings-section">
+                    <div className="settings-section-title">人声检测</div>
+                    <div className="settings-grid">
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            VAD 阈值
+                            <Tooltip title="语音活动检测灵敏度，值越高越严格（默认 0.5）">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="vadThreshold"
+                      >
+                        <InputNumberWithUnit min={0.1} max={1.0} step={0.05} />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            最短静音
+                            <Tooltip title="值越大分段越少（默认 1.5）">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="minSilenceDuration"
+                      >
+                        <InputNumberWithUnit min={0.5} max={5.0} step={0.1} unit="秒" />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            最短语音
+                            <Tooltip title="过短的片段会被过滤（默认 1.0）">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="minSpeechDuration"
+                      >
+                        <InputNumberWithUnit min={0.5} max={5.0} step={0.1} unit="秒" />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            最长分段
+                            <Tooltip title="超过此长度的连续语音会被强制切分（默认 60）">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="vadMaxSpeechDuration"
+                      >
+                        <InputNumberWithUnit min={10} max={120} step={5} unit="秒" />
+                      </Form.Item>
+                    </div>
+                  </div>
+
+                  <div className="settings-section">
+                    <div className="settings-section-title">说话人识别模型</div>
+                    <div className="settings-grid">
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            分离阈值
+                            <Tooltip title="值越高区分出的说话人越少（默认 1.2）">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="diarizationDistanceThreshold"
+                      >
+                        <InputNumberWithUnit min={0.5} max={2.0} step={0.05} />
+                      </Form.Item>
+                      <Form.Item
+                        label={
+                          <span className="label-with-tooltip">
+                            诊断日志
+                            <Tooltip title="开启后，文件识别过程会写入诊断日志到用户数据目录的 logs 文件夹，用于排查识别报错。正式使用可关闭。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="debugAsrLog"
+                        valuePropName="checked"
+                      >
+                        <Switch />
+                      </Form.Item>
+                    </div>
+                  </div>
+                </div>
               </Form>
             ),
           },

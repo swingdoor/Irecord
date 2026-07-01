@@ -7,7 +7,13 @@
  */
 const path = require('path');
 const fs = require('fs');
+const { spawnSync } = require('child_process');
 const sherpa = require('sherpa-onnx-node');
+// 说话人 embedding 改用 onnxruntime-node 直接跑 ERES2Net（sherpa 的 embedding 在
+// macOS/Apple Silicon 上内存随音频时长累积,见 change replace-embedding-with-onnxruntime）。
+// ASR/VAD/readWave 仍用 sherpa（无内存问题）。
+const ort = require('onnxruntime-node');
+const { computeFbank, NUM_MEL } = require('./kaldi-fbank');
 
 // 直接拿到 native addon，用于在 sherpa 自带的 JSON.parse 崩溃时兜底
 // （某些音频段 Qwen3-ASR 输出的 token 里混入了未转义的控制字符，
@@ -156,170 +162,488 @@ function getResultSafe(recognizer, stream) {
   }
 }
 
-// 后处理说话人分离结果
-function postProcessSegments(segments, asrParams = {}) {
-  if (segments.length === 0) return [];
-
-  const TRIMMED_MIN = asrParams.trimmedMinDuration || 0.5;
-  const MERGE_GAP = asrParams.sameSpeakerMergeGap || 2.0;
-  const MAX_DURATION = asrParams.maxSegmentDuration || 60.0;
-
-  // 1. 按开始时间排序
-  const sorted = segments.slice().sort((a, b) => a.start - b.start);
-
-  // 2. 裁剪重叠部分：如果两段有重叠，裁剪前段的结束时间
-  const trimmed = [{ ...sorted[0] }];
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = trimmed[trimmed.length - 1];
-    const curr = { ...sorted[i] };
-
-    if (curr.start < prev.end) {
-      // 有重叠，裁剪前段的结束时间
-      prev.end = curr.start;
-    }
-
-    // 如果前段被裁剪后太短，移除
-    if (prev.end - prev.start < TRIMMED_MIN) {
-      trimmed.pop();
-    }
-
-    trimmed.push(curr);
-  }
-
-  // 3. 先合并相邻同说话人段（间隔 < MERGE_GAP，不限长度）
-  const merged = [trimmed[0]];
-  for (let i = 1; i < trimmed.length; i++) {
-    const prev = merged[merged.length - 1];
-    const curr = trimmed[i];
-    if (curr.speaker === prev.speaker && curr.start - prev.end < MERGE_GAP) {
-      merged[merged.length - 1] = { ...prev, end: curr.end };
-    } else {
-      merged.push(curr);
-    }
-  }
-
-  // 4. 超长段强制切分（保留 speaker），切分后不再合并
-  const result = [];
-  for (const seg of merged) {
-    const dur = seg.end - seg.start;
-    if (dur <= MAX_DURATION) {
-      result.push(seg);
-    } else {
-      let offset = seg.start;
-      while (offset < seg.end) {
-        const end = Math.min(offset + MAX_DURATION, seg.end);
-        result.push({ ...seg, start: offset, end });
-        offset = end;
-      }
-    }
-  }
-
-  return result;
-}
-
 // ========== 策略 1: 说话人分离 ==========
 
-function runWithDiarization(args) {
-  const { wavPath, modelDir, modelType, segmentationModelPath, embeddingModelPath, numThreads } = args;
+/** 余弦相似度 */
+function cosineSimilarity(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+/** 多个向量求均值（代表向量） */
+function meanEmbedding(vectors, dim) {
+  const acc = new Float32Array(dim);
+  for (const v of vectors) for (let i = 0; i < dim; i++) acc[i] += v[i];
+  for (let i = 0; i < dim; i++) acc[i] /= vectors.length;
+  return acc;
+}
+
+/**
+ * 创建并复用 ERES2Net 的 onnxruntime InferenceSession（进程内单例,内存不随段数累积）。
+ */
+async function createEmbeddingSession(embeddingModelPath) {
+  return ort.InferenceSession.create(embeddingModelPath, {
+    enableCpuMemArena: true,
+    intraOpNumThreads: 4,
+  });
+}
+
+/**
+ * 计算一段样本的说话人 embedding：自实现 kaldi fbank → onnxruntime 推理 → 512 维向量。
+ * fbank 与 kaldi-native-fbank 数值对齐(见 kaldi-fbank.js)。段太短(无帧)返回 null。
+ */
+async function computeEmbedding(session, samples) {
+  const { feat, T } = computeFbank(samples);
+  if (T === 0) return null;
+  const out = await session.run({ x: new ort.Tensor('float32', feat, [1, T, NUM_MEL]) });
+  return Float32Array.from(out.embedding.data);
+}
+
+/**
+ * 多窗平均 embedding（降噪,见 design.md D2）：段内等距取 numWin 个 ~winSec 窗口,
+ * 各算 embedding 后求均值作为该段代表向量。段短于一个窗口时退化为单次。
+ * 任一窗口失败则跳过该窗；全部失败返回 null。
+ */
+async function computeEmbeddingMultiWin(session, samples, sampleRate, numWin = 3, winSec = 10) {
+  const winSamples = Math.floor(winSec * sampleRate);
+  const vecs = [];
+  if (samples.length <= winSamples) {
+    try { const v = await computeEmbedding(session, samples); if (v) vecs.push(v); } catch (_) { /* skip */ }
+  } else {
+    const maxStart = samples.length - winSamples;
+    for (let k = 0; k < numWin; k++) {
+      const start = Math.round(numWin === 1 ? 0 : (maxStart * k) / (numWin - 1));
+      try { const v = await computeEmbedding(session, samples.slice(start, start + winSamples)); if (v) vecs.push(v); } catch (_) { /* skip */ }
+    }
+  }
+  if (vecs.length === 0) return null;
+  if (vecs.length === 1) return vecs[0];
+  return meanEmbedding(vecs, vecs[0].length);
+}
+
+
+// ===== 谱聚类 NME-SC（快速模式用，eigengap 自动定人数，见 design.md D3）=====
+
+/** Jacobi 特征分解（对称矩阵）。返回 { values: Float64Array, V: Float64Array[] }，V 为按列特征向量。 */
+function jacobiEigen(Ain, maxIter = 100) {
+  const n = Ain.length;
+  const A = Ain.map(r => Float64Array.from(r));
+  const V = Array.from({ length: n }, (_, i) => { const r = new Float64Array(n); r[i] = 1; return r; });
+  for (let iter = 0; iter < maxIter; iter++) {
+    let p = 0, q = 1, off = 0;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { if (Math.abs(A[i][j]) > off) { off = Math.abs(A[i][j]); p = i; q = j; } }
+    if (off < 1e-9) break;
+    const app = A[p][p], aqq = A[q][q], apq = A[p][q];
+    const phi = 0.5 * Math.atan2(2 * apq, aqq - app);
+    const c = Math.cos(phi), s = Math.sin(phi);
+    for (let k = 0; k < n; k++) { const akp = A[k][p], akq = A[k][q]; A[k][p] = c * akp - s * akq; A[k][q] = s * akp + c * akq; }
+    for (let k = 0; k < n; k++) { const apk = A[p][k], aqk = A[q][k]; A[p][k] = c * apk - s * aqk; A[q][k] = s * apk + c * aqk; }
+    for (let k = 0; k < n; k++) { const vkp = V[k][p], vkq = V[k][q]; V[k][p] = c * vkp - s * vkq; V[k][q] = s * vkp + c * vkq; }
+  }
+  const values = new Float64Array(n);
+  for (let i = 0; i < n; i++) values[i] = A[i][i];
+  return { values, V };
+}
+
+/** k-means（确定性最远点初始化，避免随机导致标签漂移）。rows: Float64Array[]。返回标签数组。 */
+function kmeansDet(rows, k, iters = 50) {
+  const n = rows.length, d = rows[0].length;
+  const dist2 = (a, b) => { let s = 0; for (let i = 0; i < d; i++) { const x = a[i] - b[i]; s += x * x; } return s; };
+  // 最远点初始化：固定从 row 0 起，依次选离已有质心集合最远的点
+  const cent = [Float64Array.from(rows[0])];
+  while (cent.length < k) {
+    let best = -1, bestD = -1;
+    for (let i = 0; i < n; i++) {
+      let dmin = Infinity;
+      for (const c of cent) { const dd = dist2(rows[i], c); if (dd < dmin) dmin = dd; }
+      if (dmin > bestD) { bestD = dmin; best = i; }
+    }
+    cent.push(Float64Array.from(rows[best]));
+  }
+  let labels = new Array(n).fill(0);
+  for (let it = 0; it < iters; it++) {
+    let changed = false;
+    for (let i = 0; i < n; i++) {
+      let bd = Infinity, bl = 0;
+      for (let c = 0; c < k; c++) { const s = dist2(rows[i], cent[c]); if (s < bd) { bd = s; bl = c; } }
+      if (labels[i] !== bl) { labels[i] = bl; changed = true; }
+    }
+    const acc = Array.from({ length: k }, () => new Float64Array(d)); const cnt = new Array(k).fill(0);
+    for (let i = 0; i < n; i++) { cnt[labels[i]]++; for (let j = 0; j < d; j++) acc[labels[i]][j] += rows[i][j]; }
+    for (let c = 0; c < k; c++) if (cnt[c]) for (let j = 0; j < d; j++) cent[c][j] = acc[c][j] / cnt[c];
+    if (!changed && it > 0) break;
+  }
+  return labels;
+}
+
+/**
+ * 谱聚类 NME-SC：余弦相似度 → 截断负值取 p-近邻 affinity → 对称化 → 归一化拉普拉斯
+ * → Jacobi 特征分解 → 最大 eigengap 估 k → 前 k 特征向量行归一化 → k-means。
+ * eigengap 自动定人数；塌缩保护：n≥2 而估计 k=1 时至少取 2（见 design.md D3）。
+ * 返回与 embeddings 平行的标签数组（簇编号按首次出现顺序）。
+ */
+function spectralCluster(embeddings, pNeighbors = 10) {
+  const n = embeddings.length;
+  if (n === 0) return [];
+  if (n === 1) return [0];
+  if (n === 2) return [0, 1];
+
+  // 相似度矩阵
+  const S = Array.from({ length: n }, () => new Float64Array(n));
+  for (let i = 0; i < n; i++) for (let j = i; j < n; j++) { const v = cosineSimilarity(embeddings[i], embeddings[j]); S[i][j] = v; S[j][i] = v; }
+
+  // p-近邻 affinity（截断负相似度），对称化
+  const p = Math.min(pNeighbors, n - 1);
+  const A = Array.from({ length: n }, () => new Float64Array(n));
+  for (let i = 0; i < n; i++) {
+    const sims = [];
+    for (let j = 0; j < n; j++) if (j !== i) sims.push([j, Math.max(0, S[i][j])]);
+    sims.sort((a, b) => b[1] - a[1]);
+    for (let t = 0; t < p; t++) A[i][sims[t][0]] = sims[t][1];
+  }
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { const v = Math.max(A[i][j], A[j][i]); A[i][j] = v; A[j][i] = v; }
+
+  // 归一化拉普拉斯 L = I - D^-1/2 A D^-1/2
+  const deg = new Float64Array(n);
+  for (let i = 0; i < n; i++) { let s = 0; for (let j = 0; j < n; j++) s += A[i][j]; deg[i] = s || 1e-9; }
+  const L = Array.from({ length: n }, () => new Float64Array(n));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) L[i][j] = (i === j ? 1 : 0) - A[i][j] / Math.sqrt(deg[i] * deg[j]);
+
+  // 特征分解，按特征值升序
+  const { values, V } = jacobiEigen(L);
+  const order = Array.from(values.keys()).sort((a, b) => values[a] - values[b]);
+
+  // eigengap 估 k（看前 maxK 个间隙取最大）
+  const maxK = Math.min(10, n - 1);
+  let bestGap = -1, estK = 1;
+  for (let k = 1; k < maxK; k++) { const gap = values[order[k]] - values[order[k - 1]]; if (gap > bestGap) { bestGap = gap; estK = k; } }
+  // 塌缩保护：n≥2 而估计 k=1 时至少取 2
+  let k = estK;
+  if (n >= 2 && k < 2) k = 2;
+
+  // 谱嵌入：前 k 个特征向量按行，行归一化
+  const rows = Array.from({ length: n }, () => new Float64Array(k));
+  for (let i = 0; i < n; i++) {
+    for (let c = 0; c < k; c++) rows[i][c] = V[i][order[c]];
+    let nr = 0; for (let c = 0; c < k; c++) nr += rows[i][c] ** 2; nr = Math.sqrt(nr) || 1;
+    for (let c = 0; c < k; c++) rows[i][c] /= nr;
+  }
+  const raw = kmeansDet(rows, k);
+
+  // 按首次出现顺序重排簇编号（与输入顺序无关地稳定）
+  const remap = new Map(); let next = 0;
+  const labels = raw.map(l => { if (!remap.has(l)) remap.set(l, next++); return remap.get(l); });
+  process.stderr.write(`[spectral] segments=${n} pNeighbors=${p} estK=${estK} k=${k} clusters=${next}\n`);
+  return labels;
+}
+
+/**
+ * 快速模式：readWave → VAD（maxSpeechDuration 强切）→ 逐段识别（空文本丢弃）
+ * → 逐段多窗平均 embedding → 谱聚类 NME-SC（eigengap 自动定人数）→ 合并相邻同说话人。
+ * 单进程线性处理，峰值 ~1GB（见 design.md D2/D3）。
+ */
+async function runFastDiarization(args) {
+  const { wavPath, modelDir, modelType, embeddingModelPath, vadModelPath, numThreads } = args;
   const asrParams = args.asrParams || {};
+  const minSampleLength = asrParams.minSampleLength || 1600;
 
   send({ type: 'progress', stage: 'initializing', percent: 10 });
 
-  const sd = new sherpa.OfflineSpeakerDiarization({
-    segmentation: {
-      pyannote: { model: segmentationModelPath },
-      numThreads,
-      debug: 0,
-    },
-    embedding: {
-      model: embeddingModelPath,
-      numThreads,
-      debug: 0,
-    },
-    clustering: {
-      threshold: asrParams.clusteringThreshold || 0.85,
-    },
-    minDurationOn: asrParams.minDurationOn || 1.0,
-    minDurationOff: asrParams.minDurationOff || 1.0,
-  });
-
   const recognizer = createRecognizer(modelDir, modelType, numThreads, asrParams);
+  // 说话人 embedding 用 onnxruntime-node 直接跑 ERES2Net（内存不随时长累积）。
+  const embSession = await createEmbeddingSession(embeddingModelPath);
+
+  // VAD 在源头限制单段最大时长（vadMaxSpeechDuration），超过即强制切分（见 design.md D2）。
+  const windowSize = 512;
+  const vad = new sherpa.Vad({
+    sileroVad: {
+      model: vadModelPath,
+      threshold: asrParams.vadThreshold || 0.5,
+      minSilenceDuration: asrParams.minSilenceDuration || 1.5,
+      minSpeechDuration: asrParams.minSpeechDuration || 1.0,
+      maxSpeechDuration: asrParams.vadMaxSpeechDuration || 60,
+      windowSize,
+    },
+    sampleRate: 16000,
+    debug: 0,
+  });
 
   send({ type: 'progress', stage: 'segmenting', percent: 20 });
 
-  const wave = sherpa.readWave(wavPath);
-  const sdResult = sd.process(wave.samples);
+  // enableExternalBuffer=false：Electron 自带的 V8 开启了 sandbox，禁止外部内存支撑的
+  // ArrayBuffer。让 sherpa 把样本复制进 V8 内部 buffer，避免 "External buffers are not allowed"。
+  const wave = sherpa.readWave(wavPath, false);
 
-  // 后处理：过滤重叠、切分超长段、合并相邻同说话人段
-  const processed = postProcessSegments(sdResult, asrParams);
+  for (let i = 0; i + windowSize <= wave.samples.length; i += windowSize) {
+    vad.acceptWaveform(wave.samples.slice(i, i + windowSize));
+  }
+  vad.flush();
+
+  const speechSegments = [];
+  while (!vad.isEmpty()) {
+    speechSegments.push(vad.front(false)); // { start(秒), samples }
+    vad.pop();
+  }
+  process.stderr.write(`[fast-diarization] totalSamples=${wave.samples.length} vadSegments=${speechSegments.length} maxSpeech=${asrParams.vadMaxSpeechDuration || 60}\n`);
 
   send({ type: 'progress', stage: 'recognizing', percent: 40 });
 
-  const segments = [];
-  const speakerStats = {};
-  const minSampleLength = asrParams.minSampleLength || 1600;
+  // 逐段：先识别（空文本立即丢弃），再算多窗平均 embedding。
+  // emb 为 null 表示该段提取失败——保留文本、稍后标 speaker=null，不因 emb 失败丢文本。
+  const items = []; // { start, end, text, emb: Float32Array|null }
+  for (let i = 0; i < speechSegments.length; i++) {
+    const seg = speechSegments[i];
+    // sherpa SpeechSegment.start 是样本下标（int32），换算到秒得到全局时间轴。
+    const startSec = seg.start / 16000;
+    const start = Math.round(startSec * 100) / 100;
+    const samples = seg.samples;
+    if (samples.length < minSampleLength) continue;
 
-  for (let i = 0; i < processed.length; i++) {
-    const seg = processed[i];
-    const speaker = `Speaker ${seg.speaker + 1}`;
-    const start = Math.round(seg.start * 100) / 100;
-    const end = Math.round(seg.end * 100) / 100;
-
-    // 提取该段音频
-    const startSample = Math.floor(seg.start * wave.sampleRate);
-    const endSample = Math.min(Math.floor(seg.end * wave.sampleRate), wave.samples.length);
-    const segSamples = wave.samples.slice(startSample, endSample);
-
-    if (segSamples.length < minSampleLength) continue; // 跳过太短的段
+    const end = Math.round((startSec + samples.length / 16000) * 100) / 100;
 
     let text;
     try {
-      const result = recognizeWave(recognizer, segSamples, wave.sampleRate);
+      const result = recognizeWave(recognizer, samples, 16000);
       text = String(result.text || '').trim();
     } catch (segErr) {
-      // 单段失败不中断整体；写到 stderr，父进程会落到日志
-      process.stderr.write(`[diarization-seg-error] index=${i} start=${start} end=${end} speaker=${speaker} samples=${segSamples.length} err=${segErr && segErr.stack ? segErr.stack : String(segErr)}\n`);
+      process.stderr.write(`[diarization-seg-error] index=${i} start=${start} end=${end} samples=${samples.length} err=${segErr && segErr.stack ? segErr.stack : String(segErr)}\n`);
       continue;
     }
-    if (!text) continue;
+    if (!text) continue; // 静音/噪声段在聚类前淘汰
 
-    segments.push({ text, start, end, speaker });
+    // 多窗平均 embedding（降噪）：段内等距 3 窗、每窗 10s。失败返回 null，不影响文本保留。
+    const emb = await computeEmbeddingMultiWin(embSession, samples, 16000, 3, 10);
 
-    if (!speakerStats[speaker]) {
-      speakerStats[speaker] = { segments: 0, duration: 0 };
-    }
-    speakerStats[speaker].segments++;
-    speakerStats[speaker].duration += end - start;
+    items.push({ start, end, text, emb });
 
-    const progress = 40 + Math.floor((i + 1) / processed.length * 55);
+    const progress = 40 + Math.floor((i + 1) / speechSegments.length * 50);
     send({ type: 'progress', stage: 'recognizing', percent: progress });
   }
 
-  // 统计时长取两位小数
+  // 谱聚类（NME-SC，自动定人数）：只对成功取到 emb 的段聚类；emb 失败的段 speaker 置 null。
+  send({ type: 'progress', stage: 'clustering', percent: 92 });
+  const embIndices = [];
+  const embVectors = [];
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].emb) { embIndices.push(i); embVectors.push(items[i].emb); }
+  }
+  const labels = spectralCluster(embVectors);
+  for (let k = 0; k < embIndices.length; k++) {
+    items[embIndices[k]].speaker = `Speaker ${labels[k] + 1}`;
+  }
+  for (const it of items) { if (!it.speaker) it.speaker = null; }
+
+  // 合并相邻同说话人段（间隔 < sameSpeakerMergeGap，文本换行拼接）。
+  // speaker 为 null 的段不与任何段合并（身份未知，避免误并）。
+  const mergeGap = asrParams.sameSpeakerMergeGap || 2.0;
+  const merged = [];
+  for (const it of items) {
+    const last = merged[merged.length - 1];
+    if (last && it.speaker !== null && last.speaker === it.speaker && it.start - last.end < mergeGap) {
+      last.text += '\n' + it.text;
+      last.end = it.end;
+    } else {
+      merged.push({ start: it.start, end: it.end, text: it.text, speaker: it.speaker });
+    }
+  }
+
+  // segments 输出 + speakerStats（null speaker 不计入统计）
+  const segments = [];
+  const speakerStats = {};
+  for (const m of merged) {
+    const seg = { text: m.text, start: m.start, end: m.end };
+    if (m.speaker) {
+      seg.speaker = m.speaker;
+      if (!speakerStats[m.speaker]) speakerStats[m.speaker] = { segments: 0, duration: 0 };
+      speakerStats[m.speaker].segments++;
+      speakerStats[m.speaker].duration += m.end - m.start;
+    }
+    segments.push(seg);
+  }
   for (const key of Object.keys(speakerStats)) {
     speakerStats[key].duration = Math.round(speakerStats[key].duration * 100) / 100;
   }
 
-  // 合并相邻同说话人段的文本和时间范围（用于最终显示）
-  const mergedForDisplay = [];
-  const displayMergeGap = asrParams.displayMergeGap || 0.5;
-  for (const seg of segments) {
-    if (!seg.text.trim()) continue; // 跳过去重后变空的段
+  const fullText = segments.map(s => s.text).join('\n');
 
-    const last = mergedForDisplay[mergedForDisplay.length - 1];
-    if (last && last.speaker === seg.speaker && seg.start - last.end < displayMergeGap) {
-      // 相邻同说话人段，合并文本和时间
-      last.text += seg.text;
-      last.end = seg.end;
+  send({ type: 'progress', stage: 'done', percent: 100 });
+  send({ type: 'result', text: fullText, segments, speakerStats, keywords: extractKeywords(fullText), lang: 'zh', strategy: 'speaker-diarization' });
+}
+
+// ========== 精确模式：孙进程隔离 sd.process（见 design.md D1）==========
+
+/**
+ * 孙进程：readWave(整段) → sd.process(整段) 一次 → emit [{start,end,speaker}] JSON → 退出。
+ * 只做分离、不加载识别器；退出后 OS 回收其 ~4.5GB，与主进程识别阶段内存错峰。
+ * sd.process 返回的 start/end 单位为秒，原样回传，不做采样率换算（见 design.md D4）。
+ */
+function runDiarizeSd(args) {
+  const { wavPath, segmentationModelPath, embeddingModelPath, numThreads } = args;
+  const asrParams = args.asrParams || {};
+
+  const sd = new sherpa.OfflineSpeakerDiarization({
+    segmentation: { pyannote: { model: segmentationModelPath }, numThreads, debug: 0 },
+    embedding: { model: embeddingModelPath, numThreads, debug: 0 },
+    // sd 内置 FastClustering 的 threshold 是【距离阈值】(越大簇越少),语义与
+    // 快速模式的余弦相似度 speakerClusterThreshold 完全不同,不可混用。
+    // 实测(test34,见 design.md):0.5→~90人(过碎),1.2→5人(2主讲+1次要,理想),
+    // 1.4→SIGSEGV。默认 1.2;孙进程崩溃由编排器降级到快速模式。
+    clustering: { threshold: asrParams.diarizationDistanceThreshold || 1.2 },
+    minDurationOn: 1.0,
+    minDurationOff: 1.0,
+  });
+
+  // enableExternalBuffer=false：见主流程说明（Electron V8 sandbox 限制）。
+  const wave = sherpa.readWave(wavPath, false);
+  const sdResult = sd.process(wave.samples); // [{start,end,speaker}]，start/end 为秒
+  process.stderr.write(`[mem] diarize-sd 孙进程 sd.process 完成 rss=${Math.round(process.memoryUsage().rss / 1048576)}MB\n`);
+
+  const segments = sdResult.map(s => ({ start: s.start, end: s.end, speaker: s.speaker }));
+  process.stdout.write(JSON.stringify({ type: 'diarize-sd-result', segments }) + '\n');
+}
+
+/**
+ * 精确模式编排器（主进程）：spawn 孙进程跑 sd.process → 拿 [{start,end,speaker}]
+ * → 加载识别器 → 按说话人段逐段识别（>上限切片喂入，文本拼接，时间戳用原段）
+ * → 合并相邻同说话人 → speakerStats。内存峰值 = max(孙 ~4.5GB, 主 ~680MB)（见 design.md D1）。
+ * 孙进程异常 → 抛错由上层降级到快速模式（见 design.md D5）。
+ */
+function runPreciseDiarization(args) {
+  const { wavPath, modelDir, modelType, segmentationModelPath, embeddingModelPath, numThreads } = args;
+  const asrParams = args.asrParams || {};
+  const minSampleLength = asrParams.minSampleLength || 1600;
+
+  send({ type: 'progress', stage: 'initializing', percent: 8 });
+  send({ type: 'progress', stage: 'segmenting', percent: 12 });
+
+  // —— 阶段1：孙进程跑 sd.process（主进程此时不加载识别器，内存几乎为零）——
+  const childArgs = {
+    mode: 'diarize-sd',
+    wavPath, segmentationModelPath, embeddingModelPath, numThreads,
+    asrParams,
+  };
+  const proc = spawnSync(process.execPath, [__filename], {
+    input: JSON.stringify(childArgs),
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    maxBuffer: 64 * 1024 * 1024,
+    encoding: 'utf-8',
+  });
+
+  if (proc.status !== 0 || proc.signal) {
+    const tail = (proc.stderr || '').slice(-400);
+    throw new Error(`precise diarize 孙进程失败 status=${proc.status} signal=${proc.signal} stderrTail=${tail}`);
+  }
+  process.stderr.write(`[mem] 编排器 孙进程已退出(回收前) rss=${Math.round(process.memoryUsage().rss / 1048576)}MB\n`);
+
+  let sdSegments = null;
+  for (const line of (proc.stdout || '').split('\n')) {
+    if (!line.trim()) continue;
+    try { const m = JSON.parse(line); if (m.type === 'diarize-sd-result') sdSegments = m.segments; } catch (_) { /* skip */ }
+  }
+  if (!sdSegments) {
+    throw new Error(`precise diarize 孙进程无结果 stdoutTail=${(proc.stdout || '').slice(-200)}`);
+  }
+
+  // 时间戳对齐校验（见 design.md D4）：sd 返回秒，末段 end 应在音频时长量级，
+  // 若出现 ×16000 量级说明单位被误当样本下标，立即告警。
+  const lastEnd = sdSegments.length ? sdSegments[sdSegments.length - 1].end : 0;
+  process.stderr.write(`[precise-diarization] sdSegments=${sdSegments.length} lastEnd=${lastEnd.toFixed(2)}s\n`);
+
+  // 按说话人段排序（保险）
+  sdSegments.sort((a, b) => a.start - b.start);
+
+  send({ type: 'progress', stage: 'recognizing', percent: 40 });
+
+  // —— 阶段2：加载识别器，按说话人段逐段识别（孙进程已退出，内存错峰）——
+  const recognizer = createRecognizer(modelDir, modelType, numThreads, asrParams);
+  const wave = sherpa.readWave(wavPath, false);
+  const sampleRate = wave.sampleRate;
+  process.stderr.write(`[mem] 编排器 识别器+wave 已加载 rss=${Math.round(process.memoryUsage().rss / 1048576)}MB\n`);
+
+  // 识别输入安全上限（秒）：超过则切片喂入，文本拼接，时间戳用原说话人段（见 design.md D4）。
+  const maxRecSec = asrParams.vadMaxSpeechDuration || 60;
+  const maxRecSamples = Math.floor(maxRecSec * sampleRate);
+
+  const items = []; // { start, end, speaker, text }
+  for (let i = 0; i < sdSegments.length; i++) {
+    const seg = sdSegments[i];
+    const startSample = Math.max(0, Math.floor(seg.start * sampleRate));
+    const endSample = Math.min(Math.floor(seg.end * sampleRate), wave.samples.length);
+    if (endSample - startSample < minSampleLength) continue;
+
+    // 切片识别（仅为识别器输入安全；时间戳仍用原段）
+    const pieces = [];
+    for (let off = startSample; off < endSample; off += maxRecSamples) {
+      const sliceEnd = Math.min(off + maxRecSamples, endSample);
+      const samples = wave.samples.slice(off, sliceEnd);
+      if (samples.length < minSampleLength) continue;
+      try {
+        const result = recognizeWave(recognizer, samples, sampleRate);
+        const t = String(result.text || '').trim();
+        if (t) pieces.push(t);
+      } catch (segErr) {
+        process.stderr.write(`[precise-seg-error] index=${i} off=${off} err=${segErr && segErr.stack ? segErr.stack : String(segErr)}\n`);
+      }
+    }
+    const text = pieces.join('');
+    if (!text) continue;
+
+    items.push({
+      start: Math.round(seg.start * 100) / 100,
+      end: Math.round(seg.end * 100) / 100,
+      speaker: `Speaker ${seg.speaker + 1}`,
+      text,
+    });
+
+    const progress = 40 + Math.floor((i + 1) / sdSegments.length * 55);
+    send({ type: 'progress', stage: 'recognizing', percent: progress });
+  }
+
+  // 合并相邻同说话人段（间隔 < sameSpeakerMergeGap，文本换行拼接，时间区间取并集）
+  const mergeGap = asrParams.sameSpeakerMergeGap || 2.0;
+  const merged = [];
+  for (const it of items) {
+    const last = merged[merged.length - 1];
+    if (last && last.speaker === it.speaker && it.start - last.end < mergeGap) {
+      last.text += '\n' + it.text;
+      last.end = it.end;
     } else {
-      mergedForDisplay.push({ ...seg });
+      merged.push({ ...it });
     }
   }
 
-  const fullText = mergedForDisplay.map(s => s.text).join('\n');
+  const segments = [];
+  const speakerStats = {};
+  for (const m of merged) {
+    segments.push({ text: m.text, start: m.start, end: m.end, speaker: m.speaker });
+    if (!speakerStats[m.speaker]) speakerStats[m.speaker] = { segments: 0, duration: 0 };
+    speakerStats[m.speaker].segments++;
+    speakerStats[m.speaker].duration += m.end - m.start;
+  }
+  for (const key of Object.keys(speakerStats)) {
+    speakerStats[key].duration = Math.round(speakerStats[key].duration * 100) / 100;
+  }
 
+  const fullText = segments.map(s => s.text).join('\n');
   send({ type: 'progress', stage: 'done', percent: 100 });
-  send({ type: 'result', text: fullText, segments: mergedForDisplay, speakerStats, keywords: extractKeywords(fullText), lang: 'zh', strategy: 'speaker-diarization' });
+  send({ type: 'result', text: fullText, segments, speakerStats, keywords: extractKeywords(fullText), lang: 'zh', strategy: 'speaker-diarization' });
+}
+
+/**
+ * 快速模式入口 + 降级：快速模式失败 → runWithVAD（无标签兜底）。
+ * （精确模式 runDiarization/runPreciseDiarization 已实现但暂不接入，见入口处说明。）
+ */
+async function runFastDiarizationWithFallback(args, hasVAD) {
+  try {
+    await runFastDiarization(args);
+  } catch (err) {
+    process.stderr.write(`[fast-fallback-to-vad] err=${err && err.stack ? err.stack : String(err)}\n`);
+    if (!hasVAD) throw err;
+    send({ type: 'progress', stage: 'fallback-vad', percent: 18 });
+    runWithVAD(args);
+  }
 }
 
 // ========== 策略 2: VAD 分段 ==========
@@ -346,7 +670,8 @@ function runWithVAD(args) {
 
   send({ type: 'progress', stage: 'segmenting', percent: 20 });
 
-  const wave = sherpa.readWave(wavPath);
+  // enableExternalBuffer=false：见 runFastDiarization 处说明（Electron V8 sandbox 限制）。
+  const wave = sherpa.readWave(wavPath, false);
 
   // 逐窗口送入 VAD
   const windowSize = 512;
@@ -356,10 +681,10 @@ function runWithVAD(args) {
   }
   vad.flush();
 
-  // 收集所有语音段
+  // 收集所有语音段（front(false)：同样避免外部 buffer）
   const speechSegments = [];
   while (!vad.isEmpty()) {
-    speechSegments.push(vad.front());
+    speechSegments.push(vad.front(false));
     vad.pop();
   }
 
@@ -370,13 +695,15 @@ function runWithVAD(args) {
 
   for (let i = 0; i < speechSegments.length; i++) {
     const seg = speechSegments[i];
-    const start = Math.round(seg.start * 100) / 100;
+    // sherpa SpeechSegment.start 是样本下标（int32），换算到秒得到全局时间轴。
+    const startSec = seg.start / 16000;
+    const start = Math.round(startSec * 100) / 100;
     const samples = seg.samples;
 
     if (samples.length < minSampleLength) continue;
 
     const duration = samples.length / 16000;
-    const end = Math.round((seg.start + duration) * 100) / 100;
+    const end = Math.round((startSec + duration) * 100) / 100;
 
     let text;
     try {
@@ -412,7 +739,8 @@ function runPlain(args) {
 
   send({ type: 'progress', stage: 'recognizing', percent: 30 });
 
-  const wave = sherpa.readWave(wavPath);
+  // enableExternalBuffer=false：见 runFastDiarization 处说明（Electron V8 sandbox 限制）。
+  const wave = sherpa.readWave(wavPath, false);
   const result = recognizeWave(recognizer, wave.samples, wave.sampleRate);
 
   const text = String(result.text || '');
@@ -430,22 +758,32 @@ function runPlain(args) {
 
 let inputData = '';
 process.stdin.on('data', (chunk) => { inputData += chunk; });
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   let stage = 'parse-args';
   let args;
   try {
     args = JSON.parse(inputData);
 
+    // 注：精确模式（pyannote sd.process，孙进程隔离）整套已实现但【暂不接入】。
+    // 原因：sd.process 在 macOS/Apple Silicon 上经 onnxruntime ArmKleidiAI 卷积内核
+    // 反复 Compute 时 arena 累积，峰值可顶爆系统内存甚至 SIGSEGV（实测 thr=1.4 必崩）。
+    // 风险不适合做进系统，故仅保留快速模式这一条线。相关函数（runDiarizeSd /
+    // runPreciseDiarization / runDiarization）保留备用，不在入口路由。
+    // if (args.mode === 'diarize-sd') { stage = 'diarize-sd'; runDiarizeSd(args); return; }
+
     stage = 'select-strategy';
-    const hasSegmentation = args.segmentationModelPath && fs.existsSync(args.segmentationModelPath);
     const hasEmbedding = args.embeddingModelPath && fs.existsSync(args.embeddingModelPath);
     const hasVAD = args.vadModelPath && fs.existsSync(args.vadModelPath);
 
-    process.stderr.write(`[strategy-decision] hasSegmentation=${hasSegmentation} hasEmbedding=${hasEmbedding} hasVAD=${hasVAD}\n`);
+    process.stderr.write(`[strategy-decision] hasEmbedding=${hasEmbedding} hasVAD=${hasVAD} forceStrategy=${args.forceStrategy || ''}\n`);
 
-    if (hasSegmentation && hasEmbedding) {
-      stage = 'diarization';
-      runWithDiarization(args);
+    // 父进程检测到上一轮原生崩溃后会带 forceStrategy='vad' 重跑：强制走无说话人 VAD（最外层安全网）。
+    if (args.forceStrategy === 'vad' && hasVAD) {
+      stage = 'vad';
+      runWithVAD(args);
+    } else if (hasVAD && hasEmbedding) {
+      stage = 'diarization-fast';
+      await runFastDiarizationWithFallback(args, hasVAD); // 快速模式（embedding 走 onnxruntime，async），失败降级 vad
     } else if (hasVAD) {
       stage = 'vad';
       runWithVAD(args);
