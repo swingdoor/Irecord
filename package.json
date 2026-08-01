@@ -37,7 +37,9 @@
         }
       ],
       "icon": "icon.icns",
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "nsis": {
       "oneClick": false,
