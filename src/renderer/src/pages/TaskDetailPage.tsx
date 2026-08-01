@@ -47,13 +47,11 @@ export default function TaskDetailPage() {
   }, [currentTaskId])
 
   const handleBack = useCallback(() => {
-    // 录音来源的转写任务返回实时录音 Tab，文件上传返回上传 Tab
-    const backTab = currentTask?.source === 'recording' ? 'realtime' : 'upload'
     setCurrentResult(null)
     setCurrentTask(null)
-    setActiveTab(backTab)
+    setActiveTab('upload')
     setPage('taskList')
-  }, [setPage, setCurrentResult, setCurrentTask, setActiveTab, currentTask])
+  }, [setPage, setCurrentResult, setCurrentTask, setActiveTab])
 
   const handleCopy = useCallback(async () => {
     if (!currentResult) return

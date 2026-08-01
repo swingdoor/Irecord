@@ -8,6 +8,8 @@ import { createTask, getAllTasks, getTask, getResult, deleteTask, updateTask } f
 import { startQueue, cancelCurrentTask, getCurrentTaskId, getTaskStartTime } from '../taskQueue'
 import { logError } from '../utils/errorHandler'
 import { registerFile, removeReference } from '../services/fileManager'
+import { getSettings } from '../utils/settings'
+import { getAvailableModels } from '../utils/paths'
 
 function getMainWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
@@ -38,6 +40,11 @@ function getUniqueFileName(dir: string, baseName: string, ext: string): string {
 async function addFilesCommon(filePaths: string[], modelType?: string) {
   const tasks = []
   const errors: string[] = []
+  const models = getAvailableModels()
+  const requestedModel = modelType || getSettings().defaultModel
+  const resolvedModel = models.find((model) => model.id === requestedModel && model.available)?.id
+    || models.find((model) => model.available)?.id
+    || 'sensevoice-small'
 
   for (const filePath of filePaths) {
     try {
@@ -53,7 +60,7 @@ async function addFilesCommon(filePaths: string[], modelType?: string) {
         filePath,
         fileSize: statSync(filePath).size,
         duration: info.duration,
-        modelType,
+        modelType: resolvedModel,
         source: 'upload',
       })
 

@@ -107,8 +107,7 @@ async function getDb(): Promise<SqlJsDatabase> {
     // 列已存在，忽略错误
   }
 
-  // 迁移：为 tasks 添加来源判别列（统一文件上传与录音转写流水线）
-  // source: 'upload' | 'recording'；sourceId: recording 来源时 = realtime_recordings.id
+  // 旧版本曾用 source/sourceId 关联录音转写任务；保留列以兼容已有数据库。
   try { db.run(`ALTER TABLE tasks ADD COLUMN source TEXT DEFAULT 'upload'`) } catch { /* already exists */ }
   try { db.run(`ALTER TABLE tasks ADD COLUMN sourceId TEXT`) } catch { /* already exists */ }
 
@@ -377,19 +376,6 @@ export async function deleteRealtimeRecording(id: string) {
 export async function getNextPendingTask(): Promise<Task | undefined> {
   const d = await getDb()
   return queryOne(d, "SELECT * FROM tasks WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 1")
-}
-
-/**
- * 查询某条录音关联的最新转写任务（source='recording' AND sourceId=recordingId）。
- * 用于派生录音的转写状态：无 → none；pending/processing → 转写中；completed/failed → 对应状态。
- */
-export async function getRecordingTranscriptionTask(recordingId: string): Promise<Task | undefined> {
-  const d = await getDb()
-  return queryOne(
-    d,
-    "SELECT * FROM tasks WHERE source = 'recording' AND sourceId = ? ORDER BY createdAt DESC LIMIT 1",
-    [recordingId]
-  )
 }
 
 export async function hasProcessingTask(): Promise<boolean> {

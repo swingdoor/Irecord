@@ -1,5 +1,5 @@
 import { useCallback, useState, useRef } from 'react'
-import { Button, Space, Typography, message, Modal, Checkbox, Card } from 'antd'
+import { Button, Space, Typography, message, Modal, Card, Checkbox } from 'antd'
 import { ArrowLeftOutlined, AudioOutlined, PauseCircleOutlined, PlayCircleOutlined, StopOutlined, CheckCircleFilled } from '@ant-design/icons'
 import { useRecording } from '../hooks/useRecording'
 import { WaveformVisualizer } from '../components/WaveformVisualizer'
@@ -54,8 +54,7 @@ export default function RecordingPage() {
   const [recordingTitle] = useState(() => generateRecordingTitle())
   const [recordingDate] = useState(() => new Date())
   const [confirmModalOpen, setConfirmModalOpen] = useState(false)
-  const [enableTranscription, setEnableTranscription] = useState(true)
-
+  const [transcribeAfterSave, setTranscribeAfterSave] = useState(true)
   // 阶段工作流状态
   const [stage, setStage] = useState<Stage>('recording')
   const [originalFile, setOriginalFile] = useState<{ path: string; size: number; duration: number } | null>(null)
@@ -94,7 +93,7 @@ export default function RecordingPage() {
     setPage('taskList')
   }, [reset, setPage])
 
-  // 阶段②点击"保存录音"：保存纯音频记录，可选创建语音转写，完成后 toast + 自动退出
+  // 阶段②点击"保存录音"：先保存音频，按需复用文件转写链路创建任务
   const handleSave = useCallback(async () => {
     if (!originalFile) return
     if (savingRef.current) return
@@ -106,7 +105,6 @@ export default function RecordingPage() {
         filePath: originalFile.path,
         fileSize: originalFile.size,
         duration: originalFile.duration,
-        createTranscription: enableTranscription,
       })
 
       if (saveResult.error) {
@@ -115,18 +113,30 @@ export default function RecordingPage() {
         return
       }
 
-      // 成功后提示并自动返回列表
       await refreshRealtimeRecordings()
-      if (enableTranscription) {
-        await refreshTasks()
-        message.success('录音已保存，语音转写任务已创建', 2)
+      let targetTab = 'realtime'
+      const savedFilePath = saveResult.filePath || originalFile.path
+
+      if (transcribeAfterSave) {
+        try {
+          const result = await window.electronAPI.addDroppedFiles([savedFilePath])
+          if (result.errors?.length || result.tasks.length === 0) {
+            message.warning(`录音已保存，但未创建转写任务${result.errors?.length ? `：${result.errors.join('；')}` : ''}`, 3)
+          } else {
+            await refreshTasks()
+            targetTab = 'upload'
+            message.success('录音已保存，已进入文件转写队列', 2)
+          }
+        } catch (err: any) {
+          message.warning(`录音已保存，但未创建转写任务：${err.message || '未知错误'}`, 3)
+        }
       } else {
         message.success('录音已保存', 2)
       }
 
       // 延迟 0.5s 自动退出（让用户看到 toast）
       setTimeout(() => {
-        setActiveTab('realtime')
+        setActiveTab(targetTab)
         reset()
         setPage('taskList')
       }, 500)
@@ -134,7 +144,7 @@ export default function RecordingPage() {
       message.error(err.message || '保存失败')
       savingRef.current = false
     }
-  }, [originalFile, recordingTitle, enableTranscription, refreshRealtimeRecordings, refreshTasks, setActiveTab, reset, setPage])
+  }, [originalFile, recordingTitle, transcribeAfterSave, refreshTasks, refreshRealtimeRecordings, setActiveTab, reset, setPage])
 
   const goToRecordingList = useCallback(() => {
     setActiveTab('realtime')
@@ -208,18 +218,16 @@ export default function RecordingPage() {
           </div>
         )}
 
-        {/* ===== 阶段② 停止后（仅转写开关）===== */}
+        {/* ===== 阶段② 停止后预览并保存 ===== */}
         {stage === 'stopped' && originalFile && (
           <>
             <Card size="small" title={<Space><CheckCircleFilled style={{ color: '#52c41a' }} />录音完成 · {formatDuration(originalFile.duration)} · {formatSize(originalFile.size)}</Space>}>
               <AudioPlayer filePath={originalFile.path} />
             </Card>
 
-            <Card size="small">
-              <Checkbox checked={enableTranscription} onChange={(e) => setEnableTranscription(e.target.checked)}>
-                创建语音转写（调用本地离线转写，可在实时录音列表查看进度）
-              </Checkbox>
-            </Card>
+            <Checkbox checked={transcribeAfterSave} onChange={(event) => setTranscribeAfterSave(event.target.checked)}>
+              保存录音后自动进入文件转写分析
+            </Checkbox>
 
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <Button danger onClick={handleDiscard}>放弃</Button>
@@ -243,7 +251,7 @@ export default function RecordingPage() {
         ]}
       >
         <Text type="secondary" style={{ fontSize: 13 }}>
-          停止后可选择是否创建语音转写并保存录音。
+          停止后可预览并保存录音文件。
         </Text>
       </Modal>
     </div>

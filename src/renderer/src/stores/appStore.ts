@@ -16,8 +16,6 @@ export interface Task {
   completedAt: string | null
   processingTime: number | null
   wordCount: number | null
-  source?: 'upload' | 'recording'
-  sourceId?: string | null
 }
 
 export interface RealtimeRecording {

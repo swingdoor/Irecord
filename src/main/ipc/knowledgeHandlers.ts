@@ -18,8 +18,6 @@ import {
   deleteTemplate,
   getTask,
   getResult,
-  getRealtimeRecording,
-  getRecordingTranscriptionTask,
 } from '../db/database'
 import { logError } from '../utils/errorHandler'
 
@@ -40,7 +38,7 @@ function getUniqueFileName(dir: string, baseName: string, ext: string): string {
 export function registerKnowledgeHandlers(): void {
   // 创建知识文档（异步生成）
   ipcMain.handle('create-knowledge-doc', async (_event, params: {
-    sourceIds: Array<{ type: 'task' | 'realtime'; id: string }>
+    sourceIds: Array<{ type: 'task'; id: string }>
     templateId: string
   }) => {
     try {
@@ -51,24 +49,11 @@ export function registerKnowledgeHandlers(): void {
       const texts: string[] = []
       let firstSourceName = ''
       for (const src of params.sourceIds) {
-        if (src.type === 'task') {
-          const task = await getTask(src.id)
-          const result = await getResult(src.id)
-          if (result?.text) texts.push(result.text)
-          if (!firstSourceName && task?.fileName) {
-            firstSourceName = task.fileName.replace(/\.[^.]+$/, '')
-          }
-        } else if (src.type === 'realtime') {
-          const rec = await getRealtimeRecording(src.id)
-          // 录音的转写文本不再存在录音记录上，而在其关联转写任务的 results 中
-          const transTask = await getRecordingTranscriptionTask(src.id)
-          if (transTask) {
-            const result = await getResult(transTask.id)
-            if (result?.text) texts.push(result.text)
-          }
-          if (!firstSourceName && rec?.title) {
-            firstSourceName = rec.title
-          }
+        const task = await getTask(src.id)
+        const result = await getResult(src.id)
+        if (result?.text) texts.push(result.text)
+        if (!firstSourceName && task?.fileName) {
+          firstSourceName = task.fileName.replace(/\.[^.]+$/, '')
         }
       }
 

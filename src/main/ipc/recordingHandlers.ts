@@ -1,30 +1,11 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
-import { existsSync, statSync } from 'fs'
+import { ipcMain, dialog } from 'electron'
+import { existsSync, statSync, renameSync } from 'fs'
 import { copyFile } from 'fs/promises'
-import { join } from 'path'
+import { dirname, extname, join } from 'path'
 import { AudioRecorder } from '../audio/AudioRecorder'
-import { getSettings } from '../utils/settings'
-import { createRealtimeRecording, getAllRealtimeRecordings, getRealtimeRecording, deleteRealtimeRecording, getRecordingTranscriptionTask } from '../db/database'
-import { createTask } from '../db/database'
-import { startQueue } from '../taskQueue'
+import { createRealtimeRecording, getAllRealtimeRecordings, getRealtimeRecording, deleteRealtimeRecording } from '../db/database'
 import { logError } from '../utils/errorHandler'
-import { registerFile, addReference, removeReference } from '../services/fileManager'
-
-function getMainWindow(): BrowserWindow | null {
-  const wins = BrowserWindow.getAllWindows()
-  // 找到主窗口（非浮动录音窗口），主窗口有 minWidth 设置
-  for (const win of wins) {
-    if (!win.isDestroyed()) {
-      const [width] = win.getMinimumSize()
-      if (width >= 1000) return win
-    }
-  }
-  // fallback: 返回第一个未销毁的窗口
-  for (const win of wins) {
-    if (!win.isDestroyed()) return win
-  }
-  return null
-}
+import { registerFile, removeReference } from '../services/fileManager'
 
 function getUniqueFileName(dir: string, baseName: string, ext: string): string {
   // 清理文件名中的非法字符
@@ -158,107 +139,34 @@ export function registerRecordingHandlers(): void {
     }
   })
 
-  // 为录音创建语音转写任务（统一流水线：source='recording'）
-  ipcMain.handle('create-recording-transcription', async (_event, recordingId: string) => {
-    try {
-      const recording = await getRealtimeRecording(recordingId)
-      if (!recording) return { error: '录音记录不存在' }
-
-      // 后处理移除后录音文件唯一，转写直接用 filePath
-      const transcriptionSource = recording.filePath
-      if (!existsSync(transcriptionSource)) return { error: '录音文件不存在' }
-
-      const settings = getSettings()
-      const task = await createTask({
-        fileName: recording.title,
-        filePath: transcriptionSource,
-        fileSize: recording.fileSize,
-        duration: recording.duration,
-        modelType: settings.defaultModel || 'qwen3-asr',
-        status: 'pending',
-        source: 'recording',
-        sourceId: recording.id,
-      })
-
-      // 为任务添加文件引用（复用录音的文件，不复制）
-      if (recording.fileId) {
-        addReference({ fileId: recording.fileId, ownerId: task.id, ownerType: 'task' })
-      } else {
-        // 兼容旧数据：通过 filePath 注册
-        registerFile({ filePath: transcriptionSource, ownerId: task.id, ownerType: 'task' })
-      }
-
-      const win = getMainWindow()
-      if (win) startQueue(win)
-
-      return { taskId: task.id }
-    } catch (err: any) {
-      logError('create-recording-transcription', err)
-      return { error: err.message || '创建语音转写任务失败' }
-    }
-  })
-
-  // 查询录音的转写状态（从关联 task 派生）
-  ipcMain.handle('get-recording-transcription-status', async (_event, recordingId: string) => {
-    try {
-      const task = await getRecordingTranscriptionTask(recordingId)
-      if (!task) return { status: 'none' as const }
-      return { status: task.status, taskId: task.id }
-    } catch (err: any) {
-      logError('get-recording-transcription-status', err)
-      return { status: 'none' as const, error: err.message }
-    }
-  })
-
-  // 保存录音记录（纯音频；可选创建语音转写）
+  // 保存录音记录（仅保存音频；转写统一走文件转写入口）
   ipcMain.handle('save-realtime-recording', async (_event, params: {
     title: string
     filePath: string
     fileSize: number
     duration: number
-    createTranscription: boolean
   }) => {
     try {
-      const actualFileSize = existsSync(params.filePath) ? statSync(params.filePath).size : 0
+      const ext = extname(params.filePath) || '.wav'
+      const fileName = getUniqueFileName(dirname(params.filePath), params.title, ext.slice(1))
+      const filePath = join(dirname(params.filePath), fileName)
+      if (filePath !== params.filePath) renameSync(params.filePath, filePath)
+      const actualFileSize = statSync(filePath).size
 
       const recording = await createRealtimeRecording({
-        title: params.title,
-        filePath: params.filePath,
+        title: fileName,
+        filePath,
         fileSize: actualFileSize,
         duration: params.duration,
       })
 
       // 注册文件到 FileManager
-      const fileId = registerFile({
-        filePath: params.filePath,
+      registerFile({
+        filePath,
         ownerId: recording.id,
         ownerType: 'recording'
       })
-
-      let taskId: string | undefined
-
-      if (params.createTranscription) {
-        const settings = getSettings()
-        const task = await createTask({
-          fileName: params.title,
-          filePath: params.filePath,
-          fileSize: actualFileSize,
-          duration: params.duration,
-          modelType: settings.defaultModel || 'qwen3-asr',
-          status: 'pending',
-          source: 'recording',
-          sourceId: recording.id,
-        })
-        taskId = task.id
-
-        // 复用录音文件引用
-        addReference({ fileId, ownerId: task.id, ownerType: 'task' })
-
-        const win = getMainWindow()
-        if (win) startQueue(win)
-      }
-
-      return { recordingId: recording.id, taskId }
+      return { recordingId: recording.id, filePath }
     } catch (err: any) {
       logError('save-realtime-recording', err)
       return { error: err.message || '保存录音记录失败' }

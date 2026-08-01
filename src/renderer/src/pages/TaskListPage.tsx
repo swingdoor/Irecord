@@ -62,7 +62,11 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     if (activeTab === 'realtime') {
       allData = realtimeRecordings
     } else if (activeTab === 'upload') {
-      allData = tasks.filter(t => t.source !== 'recording')
+      const recordingNameByPath = new Map(realtimeRecordings.map((recording) => [recording.filePath, recording.title]))
+      allData = tasks.map((task) => {
+        const recordingName = recordingNameByPath.get(task.filePath)
+        return recordingName ? { ...task, fileName: recordingName } : task
+      })
     } else if (activeTab === 'knowledge') {
       allData = knowledgeDocs
     }
@@ -253,10 +257,20 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     setPage('realtimeRecordingDetail')
   }, [setCurrentRealtimeRecordingId, setPage])
 
-  const handleViewTranscription = useCallback((taskId: string) => {
-    setCurrentTaskId(taskId)
-    setPage('taskDetail')
-  }, [setCurrentTaskId, setPage])
+  const handleTranscribeRecording = useCallback(async (recording: RealtimeRecording) => {
+    const result = await window.electronAPI.addDroppedFiles([recording.filePath], selectedModel)
+    if (result.errors?.length) {
+      message.error(result.errors.join('；'))
+      return
+    }
+    if (result.tasks.length > 0) {
+      await refreshTasks()
+      setActiveTab('upload')
+      const settings = await window.electronAPI.getSettings()
+      await window.electronAPI.saveSettings({ ...settings, activeTab: 'upload' })
+      message.success('已进入文件转写队列')
+    }
+  }, [selectedModel, refreshTasks, setActiveTab])
 
   const handleDeleteRecording = useCallback(async (id: string) => {
     await window.electronAPI.deleteRealtimeRecording(id)
@@ -470,21 +484,16 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
           items={[
             {
               key: 'realtime',
-              label: '实时录音',
+              label: '录音文件',
               children: (
                 <RealtimeRecordingTable
                   recordings={currentData}
-                  tasks={tasks}
-                  themeMode={themeMode}
-                  processingStartTime={processingStartTime}
-                  taskProgress={taskProgress}
                   viewMode={viewMode}
                   selectedRowKeys={selectedRealtimeRecordings}
                   onSelectedRowKeysChange={setSelectedRealtimeRecordings}
                   onView={handleViewRecording}
-                  onViewTranscription={handleViewTranscription}
+                  onTranscribe={handleTranscribeRecording}
                   onDelete={handleDeleteRecording}
-                  onRefresh={refreshRealtimeRecordings}
                 />
               ),
             },

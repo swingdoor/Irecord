@@ -18,9 +18,9 @@ export function FeatureCards({ onUpload, onRecord, onCreateDoc, onManageTemplate
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Space>
               <AudioOutlined style={{ fontSize: 24 }} />
-              <Text strong>实时录音</Text>
+              <Text strong>录音</Text>
             </Space>
-            <Text type="secondary">麦克风录音，录音完成后可转文字</Text>
+            <Text type="secondary">麦克风录音并保存音频文件</Text>
             <Button icon={<AudioOutlined />} block onClick={onRecord}>
               开始录音
             </Button>

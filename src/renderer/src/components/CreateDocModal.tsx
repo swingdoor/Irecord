@@ -10,7 +10,7 @@ interface CreateDocModalProps {
 
 export function CreateDocModal({ open, onClose, onCreated }: CreateDocModalProps) {
   const { message } = App.useApp()
-  const { tasks, realtimeRecordings, templates, refreshTemplates } = useAppStore()
+  const { tasks, templates, refreshTemplates } = useAppStore()
   const [templateId, setTemplateId] = useState<string>('')
   const [selectedSourceKeys, setSelectedSourceKeys] = useState<string[]>([])
 
@@ -24,23 +24,12 @@ export function CreateDocModal({ open, onClose, onCreated }: CreateDocModalProps
     }
   }, [open])
 
-  // 构建下拉选项：realtime::id 或 task::id
   const sourceOptions = useMemo(() => {
-    const opts: Array<{ label: string; value: string }> = []
-    for (const rec of realtimeRecordings) {
-      opts.push({
-        label: `[录音] ${rec.title}（${rec.wordCount} 字）`,
-        value: `realtime::${rec.id}`,
-      })
-    }
-    for (const task of completedTasks) {
-      opts.push({
-        label: `[转写] ${task.fileName}（${task.wordCount || 0} 字）`,
-        value: `task::${task.id}`,
-      })
-    }
-    return opts
-  }, [realtimeRecordings, completedTasks])
+    return completedTasks.map((task) => ({
+      label: `[转写] ${task.fileName}（${task.wordCount || 0} 字）`,
+      value: `task::${task.id}`,
+    }))
+  }, [completedTasks])
 
   const handleGenerate = async () => {
     if (!templateId) {
@@ -54,7 +43,7 @@ export function CreateDocModal({ open, onClose, onCreated }: CreateDocModalProps
 
     const sourceIds = selectedSourceKeys.map(key => {
       const [type, id] = key.split('::')
-      return { type: type as 'task' | 'realtime', id }
+      return { type: type as 'task', id }
     })
 
     const res = await window.electronAPI.createKnowledgeDoc({ sourceIds, templateId })
@@ -96,7 +85,7 @@ export function CreateDocModal({ open, onClose, onCreated }: CreateDocModalProps
           <div style={{ marginBottom: 6, fontWeight: 500 }}>选择识别结果</div>
           <Select
             mode="multiple"
-            placeholder="请选择录音或转写记录"
+            placeholder="请选择转写记录"
             value={selectedSourceKeys}
             onChange={setSelectedSourceKeys}
             style={{ width: '100%' }}

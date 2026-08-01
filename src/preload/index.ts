@@ -136,22 +136,17 @@ const electronAPI = {
     ipcRenderer.invoke('delete-realtime-recording', id),
   exportRealtimeRecordingWav: (filePath: string): Promise<{ filePath?: string; canceled?: boolean; error?: string }> =>
     ipcRenderer.invoke('export-realtime-recording-wav', filePath),
-  createRecordingTranscription: (recordingId: string): Promise<{ taskId?: string; error?: string }> =>
-    ipcRenderer.invoke('create-recording-transcription', recordingId),
-  getRecordingTranscriptionStatus: (recordingId: string): Promise<{ status: 'none' | 'pending' | 'processing' | 'completed' | 'failed' | 'stopped' | 'pending_analysis' | 'recording'; taskId?: string; error?: string }> =>
-    ipcRenderer.invoke('get-recording-transcription-status', recordingId),
   saveRealtimeRecording: (params: {
     title: string
     filePath: string
     fileSize: number
     duration: number
-    createTranscription: boolean
-  }): Promise<{ recordingId?: string; taskId?: string; error?: string }> =>
+  }): Promise<{ recordingId?: string; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('save-realtime-recording', params),
 
   // ===== 知识整理 =====
   createKnowledgeDoc: (params: {
-    sourceIds: Array<{ type: 'task' | 'realtime'; id: string }>
+    sourceIds: Array<{ type: 'task'; id: string }>
     templateId: string
   }): Promise<{ docId?: string; error?: string }> =>
     ipcRenderer.invoke('create-knowledge-doc', params),
