@@ -56,7 +56,7 @@ export function FeatureCards({ onUpload, onRecord, onCreateDoc, onManageTemplate
               <Text strong>知识整理</Text>
             </Space>
             <Text type="secondary">基于识别结果，AI 生成结构化文档</Text>
-            <Button icon={<FileTextOutlined />} block onClick={onCreateDoc}>新建文档</Button>
+            <Button icon={<FileTextOutlined />} block onClick={onCreateDoc}>新建总结</Button>
           </Space>
         </Card>
       </Col>

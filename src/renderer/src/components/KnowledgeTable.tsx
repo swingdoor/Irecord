@@ -236,7 +236,7 @@ export function KnowledgeTable({ docs, templates, themeMode = 'default', viewMod
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
         {docs.length === 0 ? (
-        <Empty description='暂无文档，点击上方"新建文档"开始' style={{ padding: '48px 0' }} />
+        <Empty description='暂无文档，点击上方"新建总结"开始' style={{ padding: '48px 0' }} />
       ) : viewMode === 'table' ? (
         <Table
           dataSource={docs}

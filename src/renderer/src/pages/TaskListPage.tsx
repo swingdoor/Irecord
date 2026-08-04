@@ -499,7 +499,7 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
             },
             {
               key: 'upload',
-              label: '文件上传',
+              label: '录音转写',
               children: (
                 <TaskTable
                   tasks={currentData}
