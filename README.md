@@ -2,7 +2,7 @@
 
 本地离线语音识别转写工具，基于 Electron + Sherpa-ONNX。录音或上传音视频，本地转写成文字，再借助大模型整理成结构化知识文档。音频识别全程本地运行不联网；知识整理可选接入云端 LLM。
 
-> 当前版本：v0.9.2 · 平台：Windows 10/11 · macOS (Apple Silicon / arm64)
+> 当前版本：v0.9.3 · 平台：Windows 10/11 · macOS (Apple Silicon / arm64)
 
 ## 功能特性
 
