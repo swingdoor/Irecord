@@ -4,11 +4,12 @@ import { useAppStore } from '../stores/appStore'
 
 interface CreateDocModalProps {
   open: boolean
+  initialTaskId?: string | null
   onClose: () => void
   onCreated: (docId: string) => void
 }
 
-export function CreateDocModal({ open, onClose, onCreated }: CreateDocModalProps) {
+export function CreateDocModal({ open, initialTaskId, onClose, onCreated }: CreateDocModalProps) {
   const { message } = App.useApp()
   const { tasks, templates, refreshTemplates } = useAppStore()
   const [templateId, setTemplateId] = useState<string>('')
@@ -20,9 +21,9 @@ export function CreateDocModal({ open, onClose, onCreated }: CreateDocModalProps
     if (open) {
       refreshTemplates()
       setTemplateId('')
-      setSelectedSourceKeys([])
+      setSelectedSourceKeys(initialTaskId ? [`task::${initialTaskId}`] : [])
     }
-  }, [open])
+  }, [open, initialTaskId, refreshTemplates])
 
   const sourceOptions = useMemo(() => {
     return completedTasks.map((task) => ({
@@ -57,7 +58,7 @@ export function CreateDocModal({ open, onClose, onCreated }: CreateDocModalProps
 
   return (
     <Modal
-      title="新建知识文档"
+      title="新建总结"
       open={open}
       onCancel={onClose}
       width={520}

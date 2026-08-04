@@ -32,6 +32,7 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
   const [addErrors, setAddErrors] = useState<string[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [createDocModalOpen, setCreateDocModalOpen] = useState(false)
+  const [createDocInitialTaskId, setCreateDocInitialTaskId] = useState<string | null>(null)
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
   const [taskProgress, setTaskProgress] = useState<Record<string, { stage: string; percent: number }>>({})
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
@@ -245,6 +246,16 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
     refreshTasks()
   }, [refreshTasks])
 
+  const openCreateDocModal = useCallback((taskId: string | null = null) => {
+    setCreateDocInitialTaskId(taskId)
+    setCreateDocModalOpen(true)
+  }, [])
+
+  const handleCreateDocFromTask = useCallback((e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation()
+    openCreateDocModal(taskId)
+  }, [openCreateDocModal])
+
   const handleTabChange = useCallback(async (key: string) => {
     setActiveTab(key)
     setSearchTerm('') // 切换 tab 清空搜索
@@ -289,6 +300,7 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
 
   const handleDocCreated = useCallback(async (_docId: string) => {
     setCreateDocModalOpen(false)
+    setCreateDocInitialTaskId(null)
     refreshKnowledgeDocs()
     setActiveTab('knowledge')
     const settings = await window.electronAPI.getSettings()
@@ -413,7 +425,7 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
         <FeatureCards
           onUpload={handleAddFiles}
           onRecord={handleRecord}
-          onCreateDoc={() => setCreateDocModalOpen(true)}
+          onCreateDoc={() => openCreateDocModal()}
           onManageTemplates={() => setTemplateModalOpen(true)}
         />
       </div>
@@ -515,6 +527,7 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
                   onCancel={handleCancel}
                   onExportAudio={handleExportAudio}
                   onDeepAnalysis={handleDeepAnalysisFromList}
+                  onCreateDoc={handleCreateDocFromTask}
                 />
               ),
             },
@@ -564,7 +577,11 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
 
       <CreateDocModal
         open={createDocModalOpen}
-        onClose={() => setCreateDocModalOpen(false)}
+        initialTaskId={createDocInitialTaskId}
+        onClose={() => {
+          setCreateDocModalOpen(false)
+          setCreateDocInitialTaskId(null)
+        }}
         onCreated={handleDocCreated}
       />
 

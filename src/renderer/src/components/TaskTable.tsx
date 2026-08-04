@@ -3,7 +3,7 @@ import { Table, Typography, Space, Tag, Button, Dropdown, Empty, Card, Row, Col,
 import {
   EllipsisOutlined, LoadingOutlined, PlayCircleOutlined,
   CloseOutlined, DownloadOutlined, DeleteOutlined,
-  AudioOutlined, ExperimentOutlined,
+  AudioOutlined, ExperimentOutlined, FileTextOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { Task } from '../stores/appStore'
@@ -124,9 +124,10 @@ interface TaskTableProps {
   onCancel: (e: React.MouseEvent, id: string) => void
   onExportAudio?: (e: React.MouseEvent, filePath: string) => void
   onDeepAnalysis?: (e: React.MouseEvent, taskId: string) => void
+  onCreateDoc?: (e: React.MouseEvent, taskId: string) => void
 }
 
-export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode, viewMode, selectedRowKeys, onSelectedRowKeysChange, onViewDetail, onDelete, onRestart, onCancel, onExportAudio, onDeepAnalysis }: TaskTableProps) {
+export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode, viewMode, selectedRowKeys, onSelectedRowKeysChange, onViewDetail, onDelete, onRestart, onCancel, onExportAudio, onDeepAnalysis, onCreateDoc }: TaskTableProps) {
   const [loading, setLoading] = useState(false)
 
   const handleExport = useCallback(async (taskId: string) => {
@@ -152,6 +153,7 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
       items.push({ key: 'cancel', icon: <CloseOutlined />, label: '取消' })
     }
     if (task.status === 'completed') {
+      items.push({ key: 'create-doc', icon: <FileTextOutlined />, label: '总结为文档' })
       items.push({ key: 'export', icon: <DownloadOutlined />, label: '导出 TXT' })
     }
     if (task.status === 'pending_analysis') {
@@ -182,6 +184,7 @@ export function TaskTable({ tasks, processingStartTime, taskProgress, themeMode,
         break
       case 'export-audio': onExportAudio?.(e.domEvent, task.filePath); break
       case 'deep-analysis': onDeepAnalysis?.(e.domEvent, task.id); break
+      case 'create-doc': onCreateDoc?.(e.domEvent, task.id); break
     }
   }
 
