@@ -9,7 +9,7 @@ import { shutdownQueue, startQueue } from './taskQueue'
 import { getResourcePath } from './utils/paths'
 import { cleanupOrphanFiles } from './services/fileManager'
 
-Menu.setApplicationMenu(null)
+if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
 
 // Enable audio processing features in Chromium
 app.commandLine.appendSwitch('enable-features', 'WebRtcAudioProcessing')
@@ -160,4 +160,3 @@ app.on('before-quit', async () => {
   cleanupTempFiles()
   closeDb()
 })
-
