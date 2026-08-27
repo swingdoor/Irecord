@@ -1,6 +1,6 @@
 {
   "name": "irecord",
-  "version": "0.9.3",
+  "version": "0.9.5",
   "description": "你说我记 - 本地语音识别转写工具",
   "main": "dist/main/index.js",
   "scripts": {
@@ -10,6 +10,8 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test:mcp": "tsx --test tests/mcp/*.test.ts",
+    "test:mcp:electron": "node scripts/run-mcp-electron-test.mjs",
     "clean": "rm -rf dist release",
     "build:mac": "npm run build && electron-builder --mac --arm64",
     "build:mac:clean": "npm run clean && npm run build:mac",
@@ -106,20 +108,26 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
     "@tailwindcss/vite": "^4.2.2",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/sql.js": "^1.4.11",
+    "@types/unbzip2-stream": "^1.4.3",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^41.2.1",
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
     "tailwindcss": "^4.2.2",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vite": "^7.3.2"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.1",
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@tiptap/extension-bubble-menu": "^3.22.4",
     "@tiptap/extension-link": "^3.22.4",
     "@tiptap/extension-placeholder": "^3.22.4",
@@ -140,6 +148,7 @@
     "tar": "^7.5.15",
     "unbzip2-stream": "^1.4.3",
     "wavesurfer.js": "^7.12.6",
+    "zod": "^4.4.3",
     "zustand": "^5.0.12"
   }
 }

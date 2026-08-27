@@ -1,15 +1,13 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
-import { statSync, existsSync } from 'fs'
+import { existsSync } from 'fs'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
-import { getAudioInfo } from '../audio/ffmpeg'
-import { validateFile, getFileFilters } from '../audio/validate'
-import { createTask, getAllTasks, getTask, getResult, deleteTask, updateTask } from '../db/database'
+import { getFileFilters } from '../audio/validate'
+import { getTask, getResult, deleteTask, updateTask } from '../db/database'
 import { startQueue, cancelCurrentTask, getCurrentTaskId, getTaskStartTime } from '../taskQueue'
 import { logError } from '../utils/errorHandler'
-import { registerFile, removeReference } from '../services/fileManager'
-import { getSettings } from '../utils/settings'
-import { getAvailableModels } from '../utils/paths'
+import { removeReference } from '../services/fileManager'
+import { addFilesForIpc, getAllTranscriptionsForIpc, getTranscriptionResultForIpc } from '../services/applicationService'
 
 function getMainWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
@@ -37,56 +35,6 @@ function getUniqueFileName(dir: string, baseName: string, ext: string): string {
   return fileName
 }
 
-async function addFilesCommon(filePaths: string[], modelType?: string) {
-  const tasks = []
-  const errors: string[] = []
-  const models = getAvailableModels()
-  const requestedModel = modelType || getSettings().defaultModel
-  const resolvedModel = models.find((model) => model.id === requestedModel && model.available)?.id
-    || models.find((model) => model.available)?.id
-    || 'sensevoice-small'
-
-  for (const filePath of filePaths) {
-    try {
-      const validation = await validateFile(filePath)
-      if (!validation.valid) {
-        errors.push(`${filePath.split(/[\\/]/).pop()}: ${validation.error}`)
-        continue
-      }
-
-      const info = await getAudioInfo(filePath)
-      const task = await createTask({
-        fileName: filePath.split(/[\\/]/).pop() || '',
-        filePath,
-        fileSize: statSync(filePath).size,
-        duration: info.duration,
-        modelType: resolvedModel,
-        source: 'upload',
-      })
-
-      // 注册文件到 FileManager
-      registerFile({
-        filePath,
-        ownerId: task.id,
-        ownerType: 'task'
-      })
-
-      tasks.push(JSON.parse(JSON.stringify(task)))
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '未知错误'
-      errors.push(`${filePath.split(/[\\/]/).pop()}: ${message}`)
-      logError('addFilesCommon', err)
-    }
-  }
-
-  const win = getMainWindow()
-  if (win && tasks.length > 0) {
-    startQueue(win)
-  }
-
-  return { tasks, errors }
-}
-
 export function registerTaskHandlers(): void {
   // 添加文件（支持多选）
   ipcMain.handle('add-files', async (_event, modelType?: string) => {
@@ -97,47 +45,26 @@ export function registerTaskHandlers(): void {
     })
 
     if (result.canceled || result.filePaths.length === 0) return { tasks: [], errors: [] }
-    return addFilesCommon(result.filePaths, modelType)
+    return addFilesForIpc(result.filePaths, modelType)
   })
 
   // 验证并添加拖放的文件
   ipcMain.handle('add-dropped-files', async (_event, filePaths: string[], modelType?: string) => {
-    return addFilesCommon(filePaths, modelType)
+    return addFilesForIpc(filePaths, modelType)
   })
 
   // 获取所有任务
   ipcMain.handle('get-tasks', async () => {
-    const tasks = await getAllTasks()
-    return JSON.parse(JSON.stringify(tasks))
+    return getAllTranscriptionsForIpc()
   })
 
   // 获取任务结果
   ipcMain.handle('get-task-result', async (_event, taskId: string) => {
     try {
-      const task = await getTask(taskId)
-      if (!task) return { error: '任务不存在' }
-
-      const result = await getResult(taskId)
-      if (!result) return { error: '结果不存在' }
-
-      return JSON.parse(JSON.stringify({
-        task,
-        result: {
-          text: result.text,
-          segments: result.segments ? JSON.parse(result.segments) : undefined,
-          speakerStats: result.speakerStats ? JSON.parse(result.speakerStats) : undefined,
-          keywords: result.keywords ? JSON.parse(result.keywords) : undefined,
-          lang: result.lang,
-          strategy: result.strategy,
-          aiSummary: result.aiSummary || null,
-          aiSpeakers: result.aiSpeakers || null,
-          aiMinutes: result.aiMinutes || null,
-          aiQa: result.aiQa || null,
-        },
-      }))
-    } catch (err) {
+      return await getTranscriptionResultForIpc(taskId)
+    } catch (err: unknown) {
       logError('get-task-result', err)
-      return { error: '获取任务结果失败' }
+      return { error: err instanceof Error ? err.message : '获取任务结果失败' }
     }
   })
 

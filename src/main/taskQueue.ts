@@ -9,6 +9,7 @@ import { recognizeWithSherpaCli } from './engine/sherpaCli'
 import { callLLM } from './llm/client'
 import { getSummaryPrompt, getSpeakersPrompt, getMinutesPrompt, getQaPrompt } from './llm/prompts'
 import { getSettings, getAsrParams } from './utils/settings'
+import { notifyAppDataChanged } from './services/appDataEvents'
 
 let currentProcess: ChildProcess | null = null
 let currentTaskId: string | null = null
@@ -58,12 +59,11 @@ function writeLog(stream: WriteStream | null, tag: string, payload: unknown): vo
   stream.write(`[${ts}] [${tag}] ${body}\n`)
 }
 
-export function startQueue(win: BrowserWindow) {
+export function startQueue(win?: BrowserWindow | null) {
   processNext(win)
 }
 
-
-async function processNext(win: BrowserWindow) {
+async function processNext(win?: BrowserWindow | null) {
   if (await hasProcessingTask()) return
 
   const task = await getNextPendingTask()
@@ -89,7 +89,7 @@ async function processNext(win: BrowserWindow) {
 
   try {
     writeLog(logStream, 'preprocess', { action: 'convert-to-normalized-wav', source: task.filePath })
-    win.webContents.send('task-progress', { taskId: task.id, stage: 'preprocess', percent: 5 })
+    notifyProgress(win, task.id, 'preprocess', 5)
     const wavPath = await convertToWav(task.filePath, {
       onProcess: (proc) => { currentProcess = proc },
       onStderr: (text) => writeLog(logStream, 'ffmpeg-stderr', text.replace(/\n+$/, '')),
@@ -97,7 +97,7 @@ async function processNext(win: BrowserWindow) {
     tempWavPath = wavPath
     const wavInfo = getWavInfo(wavPath)
     writeLog(logStream, 'preprocess', { action: 'convert-done', wavPath, wavInfo })
-    win.webContents.send('task-progress', { taskId: task.id, stage: 'preprocess', percent: 12 })
+    notifyProgress(win, task.id, 'preprocess', 12)
 
     const result = await recognizeWithSherpaCli({
       wavPath,
@@ -106,7 +106,7 @@ async function processNext(win: BrowserWindow) {
       asrParams: getAsrParams(),
       onProcess: (proc) => { currentProcess = proc },
       onProgress: (stage, percent) => {
-        win.webContents.send('task-progress', { taskId: task.id, stage, percent })
+        notifyProgress(win, task.id, stage, percent)
       },
       writeLog: (tag, payload) => writeLog(logStream, tag, payload),
     })
@@ -180,13 +180,24 @@ async function processNext(win: BrowserWindow) {
   }
 }
 
-function notifyTaskChanged(win: BrowserWindow, taskId: string) {
-  if (!win.isDestroyed()) {
-    win.webContents.send('task-status-changed', { taskId, startTime: taskStartTime })
+function activeWindow(preferred?: BrowserWindow | null): BrowserWindow | null {
+  if (preferred && !preferred.isDestroyed()) return preferred
+  return BrowserWindow.getAllWindows().find(window => !window.isDestroyed()) || null
+}
+
+function notifyProgress(win: BrowserWindow | null | undefined, taskId: string, stage: string, percent: number): void {
+  activeWindow(win)?.webContents.send('task-progress', { taskId, stage, percent })
+}
+
+function notifyTaskChanged(win: BrowserWindow | null | undefined, taskId: string) {
+  notifyAppDataChanged({ resource: 'transcriptions', action: 'updated', id: taskId })
+  const target = activeWindow(win)
+  if (target) {
+    target.webContents.send('task-status-changed', { taskId, startTime: taskStartTime })
   }
 }
 
-export async function cancelCurrentTask(win: BrowserWindow) {
+export async function cancelCurrentTask(win?: BrowserWindow | null) {
   if (currentProcess) {
     canceledFlag = true
     currentProcess.kill()

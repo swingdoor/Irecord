@@ -8,6 +8,7 @@ import { closeDb, resetStaleTasks } from './db/database'
 import { shutdownQueue, startQueue } from './taskQueue'
 import { getResourcePath } from './utils/paths'
 import { cleanupOrphanFiles } from './services/fileManager'
+import { mcpManager } from './mcp/manager'
 
 if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
 
@@ -131,6 +132,7 @@ app.whenReady().then(async () => {
   await resetStaleTasks()
   registerIpcHandlers()
   createWindow()
+  await mcpManager.initialize()
 
   // 清理无引用的孤儿文件
   try {
@@ -155,8 +157,16 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', async () => {
-  await shutdownQueue()
-  cleanupTempFiles()
-  closeDb()
+let shutdownStarted = false
+app.on('before-quit', (event) => {
+  if (shutdownStarted) return
+  event.preventDefault()
+  shutdownStarted = true
+  void (async () => {
+    await mcpManager.stop()
+    await shutdownQueue()
+    cleanupTempFiles()
+    closeDb()
+    app.quit()
+  })()
 })

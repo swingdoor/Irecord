@@ -9,6 +9,8 @@ import KnowledgeDetailPage from './pages/KnowledgeDetailPage'
 
 function App() {
   const page = useAppStore((state) => state.page)
+  const refreshTasks = useAppStore((state) => state.refreshTasks)
+  const refreshKnowledgeDocs = useAppStore((state) => state.refreshKnowledgeDocs)
   const [themeMode, setThemeMode] = useState<'default' | 'monochrome'>('default')
 
   useEffect(() => {
@@ -33,6 +35,11 @@ function App() {
       }
     })
   }, [])
+
+  useEffect(() => window.electronAPI.onAppDataChanged(({ resource }: { resource: 'transcriptions' | 'knowledge-documents' }) => {
+    if (resource === 'transcriptions') void refreshTasks()
+    else void refreshKnowledgeDocs()
+  }), [refreshTasks, refreshKnowledgeDocs])
 
   const monochromeTheme = {
     token: {

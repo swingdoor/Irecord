@@ -124,7 +124,7 @@ export function useRecording() {
       source.connect(analyser)
 
       // Listen for errors from main process
-      const unsubError = window.electronAPI.onRecordingError((data) => {
+      const unsubError = window.electronAPI.onRecordingError((data: { message: string }) => {
         setState(prev => ({ ...prev, error: data.message }))
       })
       cleanupListenersRef.current = [unsubError]

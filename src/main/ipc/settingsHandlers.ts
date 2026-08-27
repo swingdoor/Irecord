@@ -1,7 +1,5 @@
-import { app, ipcMain } from 'electron'
-import { join } from 'path'
-import { writeFileSync } from 'fs'
-import { getSettings, invalidateSettingsCache } from '../utils/settings'
+import { ipcMain } from 'electron'
+import { getSettings, saveSettings } from '../utils/settings'
 import { getAvailableModels, checkFfmpegExists, checkQwen3AsrModelExists, checkSenseVoiceModelExists, getUserModelsPath, getResourcePath, checkSherpaCliRuntime } from '../utils/paths'
 import { getProviderList } from '../llm/providers'
 import { getFullRegistry, downloadModel, cancelDownload, deleteModel } from '../models/downloader'
@@ -10,8 +8,6 @@ import { getModelStatus } from '../models/status'
 import { logError } from '../utils/errorHandler'
 
 export function registerSettingsHandlers(): void {
-  const settingsPath = join(app.getPath('userData'), 'settings.json')
-
   // 获取设置
   ipcMain.handle('get-settings', () => {
     return getSettings()
@@ -20,8 +16,7 @@ export function registerSettingsHandlers(): void {
   // 保存设置
   ipcMain.handle('save-settings', (_event, settings: Record<string, any>) => {
     try {
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8')
-      invalidateSettingsCache()
+      saveSettings(settings)
       return { success: true }
     } catch (err: unknown) {
       logError('save-settings', err)

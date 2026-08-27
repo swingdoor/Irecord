@@ -232,6 +232,7 @@ export async function createTask(file: { fileName: string; filePath: string; fil
     id: randomUUID(),
     fileName: file.fileName,
     filePath: file.filePath,
+    fileId: null,
     fileSize: file.fileSize,
     duration: file.duration,
     status: file.status || 'pending',

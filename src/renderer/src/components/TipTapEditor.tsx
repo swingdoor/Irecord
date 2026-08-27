@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef } from 'react'
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import { BubbleMenuPlugin } from '@tiptap/extension-bubble-menu'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -61,11 +61,11 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
           if (polishResult || polishing || showCustomInput) return false
         },
       },
-      shouldShow: ({ editor }) => {
+      shouldShow: ({ editor }: { editor: Editor }) => {
         const { from, to } = editor.state.selection
         return from !== to
       },
-    })
+    } as any)
     editor.registerPlugin(plugin)
     return () => { editor.unregisterPlugin('aiPolishBubble') }
   }, [editor, polishing, polishResult, showCustomInput])

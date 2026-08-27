@@ -4,6 +4,7 @@ import { registerSettingsHandlers } from './settingsHandlers'
 import { registerFileHandlers } from './fileHandlers'
 import { registerAnalysisHandlers } from './analysisHandlers'
 import { registerKnowledgeHandlers } from './knowledgeHandlers'
+import { registerMcpHandlers } from './mcpHandlers'
 
 export function registerIpcHandlers(): void {
   registerTaskHandlers()
@@ -12,4 +13,5 @@ export function registerIpcHandlers(): void {
   registerAnalysisHandlers()
   registerRecordingHandlers()
   registerKnowledgeHandlers()
+  registerMcpHandlers()
 }

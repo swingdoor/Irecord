@@ -2,7 +2,7 @@
 
 本地离线语音识别转写工具，基于 Electron + Sherpa-ONNX。录音或上传音视频，本地转写成文字，再借助大模型整理成结构化知识文档。音频识别全程本地运行不联网；知识整理可选接入云端 LLM。
 
-> 当前版本：v0.9.3 · 平台：Windows 10/11 · macOS (Apple Silicon / arm64)
+> 当前版本：v0.9.5 · 平台：Windows 10/11 · macOS (Apple Silicon / arm64)
 
 ## 功能特性
 
@@ -27,6 +27,11 @@
 - 📋 任务队列管理，转写后台处理
 - 💾 本地数据库持久化（sql.js）
 - 📤 导出 TXT（可选时间戳）
+
+### Agent 集成
+- 🔌 可选本地 MCP 2026-07-28 Streamable HTTP 服务，默认关闭且只监听 `127.0.0.1`
+- 🔐 开启后显示一个带本地 token 的完整连接地址，可直接复制给 Agent；地址默认持久不变，也可主动刷新
+- 🧰 九个安全工具覆盖录音发现、转写任务、模板和知识文档；不开放删除、设置、凭据或任意文件写入
 
 ## 系统要求
 
@@ -116,6 +121,8 @@ npm run dev
 
 详细操作见 [docs/使用说明.md](docs/使用说明.md)。
 
+本地 Agent 接入见 [docs/MCP服务.md](docs/MCP服务.md)。
+
 ## 技术栈
 
 | 层 | 技术 |
@@ -144,7 +151,8 @@ src/
 │   ├── keywords/         # 关键词提取
 │   ├── llm/              # LLM 客户端、服务商、提示词
 │   ├── models/           # 模型注册表、下载、状态
-│   ├── services/         # 文件管理
+│   ├── mcp/              # 本地 MCP 网关、安全边界与工具
+│   ├── services/         # 共享应用服务、文件管理
 │   └── utils/            # 路径、设置、错误处理
 ├── preload/              # 预加载脚本
 └── renderer/             # 渲染进程（React）
@@ -161,6 +169,8 @@ src/
 npm run dev          # 开发模式
 npm run typecheck    # 类型检查
 npm run build        # 构建
+npm run test:mcp     # MCP 协议、工具与安全测试
+npm run test:mcp:electron # Electron 生命周期与本地 HTTP 冒烟测试
 node scripts/test-e2e.js  # 端到端识别测试
 ```
 

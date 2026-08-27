@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Modal, Tabs, Form, Select, Input, InputNumber, Switch, Typography, Button, Space, Progress, Tag, message, Tooltip, Radio } from 'antd'
 import { DownloadOutlined, DeleteOutlined, CloseCircleOutlined, CheckCircleFilled, QuestionCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { McpSettingsPanel } from './McpSettingsPanel'
 
 const { Text } = Typography
 
@@ -851,6 +852,11 @@ export function SettingsModal({ open, onClose, availableModels, onSettingsChange
                 </Form.Item>
               </Form>
             ),
+          },
+          {
+            key: 'mcp',
+            label: 'MCP 服务',
+            children: <McpSettingsPanel />,
           },
         ]}
       />

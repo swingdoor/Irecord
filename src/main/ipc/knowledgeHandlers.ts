@@ -4,22 +4,22 @@ import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { getSettings } from '../utils/settings'
 import { callLLM } from '../llm/client'
-import { getKnowledgeDocPrompt, getPolishPrompt } from '../llm/prompts'
+import { getPolishPrompt } from '../llm/prompts'
 import {
-  createKnowledgeDoc,
   getKnowledgeDoc,
-  getAllKnowledgeDocs,
   updateKnowledgeDoc,
   deleteKnowledgeDoc,
-  getAllTemplates,
-  getTemplate,
   createTemplate,
   updateTemplate,
   deleteTemplate,
-  getTask,
-  getResult,
 } from '../db/database'
 import { logError } from '../utils/errorHandler'
+import {
+  createDocumentFromTranscriptions,
+  getAllDocumentsForIpc,
+  getAllTemplatesForIpc,
+  getDocumentForIpc,
+} from '../services/applicationService'
 
 function getUniqueFileName(dir: string, baseName: string, ext: string): string {
   // 清理文件名中的非法字符
@@ -42,66 +42,10 @@ export function registerKnowledgeHandlers(): void {
     templateId: string
   }) => {
     try {
-      const template = await getTemplate(params.templateId)
-      if (!template) return { error: '模板不存在' }
-
-      // 收集素材文本
-      const texts: string[] = []
-      let firstSourceName = ''
-      for (const src of params.sourceIds) {
-        const task = await getTask(src.id)
-        const result = await getResult(src.id)
-        if (result?.text) texts.push(result.text)
-        if (!firstSourceName && task?.fileName) {
-          firstSourceName = task.fileName.replace(/\.[^.]+$/, '')
-        }
-      }
-
-      if (texts.length === 0) return { error: '未找到有效的转写文本' }
-
-      // 确定性标题：模板名称：源文件名
-      const docTitle = firstSourceName
-        ? `${template.name}：${firstSourceName}`
-        : template.name
-
-      // 先创建一条 generating 状态的记录
-      const doc = await createKnowledgeDoc({
-        title: docTitle,
-        content: '',
-        status: 'generating',
+      const doc = await createDocumentFromTranscriptions({
+        transcriptionIds: params.sourceIds.map(source => source.id),
         templateId: params.templateId,
-        sourceIds: JSON.stringify(params.sourceIds),
       })
-
-      // 后台异步生成
-      ;(async () => {
-        try {
-          const settings = getSettings()
-          const prompt = getKnowledgeDocPrompt(template.prompt, texts)
-          const content = await callLLM(settings, prompt.system, prompt.user, 1, false)
-
-          // 去除可能的代码块标记
-          let cleanContent = content.trim()
-          if (cleanContent.startsWith('```')) {
-            cleanContent = cleanContent.replace(/^```(?:html)?\s*/, '').replace(/\s*```$/, '')
-          }
-
-          // 更新为 completed，保留确定性标题
-          await updateKnowledgeDoc(doc.id, {
-            content: cleanContent,
-            status: 'completed',
-          })
-        } catch (err: unknown) {
-          logError('create-knowledge-doc-async', err)
-          const message = err instanceof Error ? err.message : '生成失败'
-          await updateKnowledgeDoc(doc.id, {
-            title: '生成失败',
-            status: 'failed',
-            error: message,
-          })
-        }
-      })()
-
       return { docId: doc.id }
     } catch (err: unknown) {
       logError('create-knowledge-doc', err)
@@ -113,8 +57,7 @@ export function registerKnowledgeHandlers(): void {
   // 获取所有知识文档
   ipcMain.handle('get-knowledge-docs', async () => {
     try {
-      const docs = await getAllKnowledgeDocs()
-      return { docs }
+      return { docs: await getAllDocumentsForIpc() }
     } catch (err: any) {
       logError('get-knowledge-docs', err)
       return { error: err.message || '获取文档列表失败' }
@@ -124,9 +67,7 @@ export function registerKnowledgeHandlers(): void {
   // 获取单个知识文档
   ipcMain.handle('get-knowledge-doc', async (_event, docId: string) => {
     try {
-      const doc = await getKnowledgeDoc(docId)
-      if (!doc) return { error: '文档不存在' }
-      return { doc }
+      return { doc: await getDocumentForIpc(docId) }
     } catch (err: any) {
       logError('get-knowledge-doc', err)
       return { error: err.message || '获取文档失败' }
@@ -162,8 +103,7 @@ export function registerKnowledgeHandlers(): void {
   // 获取所有模板
   ipcMain.handle('get-templates', async () => {
     try {
-      const templates = await getAllTemplates()
-      return { templates }
+      return { templates: await getAllTemplatesForIpc() }
     } catch (err: any) {
       logError('get-templates', err)
       return { error: err.message || '获取模板列表失败' }

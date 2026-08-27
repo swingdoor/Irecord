@@ -1,5 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+interface McpRuntimeStatus {
+  state: 'stopped' | 'starting' | 'running' | 'error'
+  enabled: boolean
+  lastError?: string
+}
+
+interface AppDataChange {
+  resource: 'transcriptions' | 'knowledge-documents'
+  action: 'created' | 'updated'
+  id: string
+}
+
 const electronAPI = {
   // ===== 文件与模型 =====
   addFiles: (modelType?: string): Promise<{ tasks: any[]; errors: string[] }> =>
@@ -50,6 +62,11 @@ const electronAPI = {
     ipcRenderer.on('task-progress', handler)
     return () => ipcRenderer.removeListener('task-progress', handler)
   },
+  onAppDataChanged: (callback: (data: AppDataChange) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: AppDataChange) => callback(data)
+    ipcRenderer.on('app-data-changed', handler)
+    return () => ipcRenderer.removeListener('app-data-changed', handler)
+  },
 
   // ===== 设置 =====
   getSettings: (): Promise<Record<string, any>> =>
@@ -58,6 +75,15 @@ const electronAPI = {
     ipcRenderer.invoke('save-settings', settings),
   getLlmProviders: (): Promise<Array<{ id: string; name: string; baseUrl: string; models: Array<{ id: string; name: string }> }>> =>
     ipcRenderer.invoke('get-llm-providers'),
+
+  // ===== 本地 MCP 服务 =====
+  getMcpStatus: (): Promise<{ status: McpRuntimeStatus }> => ipcRenderer.invoke('mcp-get-status'),
+  configureMcp: (params: { enabled: boolean }): Promise<{ status: McpRuntimeStatus; error?: string }> =>
+    ipcRenderer.invoke('mcp-configure', params),
+  getMcpConnection: (): Promise<{ url?: string; error?: string }> =>
+    ipcRenderer.invoke('mcp-get-connection'),
+  refreshMcpConnection: (): Promise<{ url?: string; error?: string }> =>
+    ipcRenderer.invoke('mcp-refresh-connection'),
 
   // ===== 模型管理 =====
   getModelRegistry: (): Promise<{ models: any[]; offlineModels: any[]; auxiliaryModels: any[]; downloadPath: string; ffmpegExists: boolean; sherpaCliRuntime?: any; defaultModelPath: string; defaultFfmpegPath: string }> =>

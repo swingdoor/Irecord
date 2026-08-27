@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, type ReactElement } from 'react'
 import { Typography, Tabs, Spin, Button, Input, Space, Alert, Empty, Card, Divider, Tooltip, message } from 'antd'
 import { SendOutlined, ReloadOutlined, CopyOutlined, DownloadOutlined, UserOutlined, CheckCircleOutlined, QuestionCircleOutlined, MessageOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
@@ -149,7 +149,7 @@ function RenderAsk({ raw }: { raw: string }) {
   if (!answer) return <Alert type="error" message="AI 分析失败" description="请重新生成" showIcon />
 
   // 按段落分割（\n\n 或多个换行符）
-  const paragraphs = answer.split(/\n\n+/).filter(p => p.trim())
+  const paragraphs: string[] = String(answer).split(/\n\n+/).filter((paragraph: string) => paragraph.trim())
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%', marginBottom: 16 }}>
@@ -272,7 +272,7 @@ export function AiPanel({ text, segments, aiSummary, aiSpeakers, aiMinutes, aiQa
     else setAskResult(res.result || null)
   }, [text, question])
 
-  const renderers: Record<string, (raw: string) => JSX.Element> = {
+  const renderers: Record<string, (raw: string) => ReactElement> = {
     summary: (raw) => <RenderSummary raw={raw} />,
     speakers: (raw) => <RenderSpeakers raw={raw} />,
     minutes: (raw) => <RenderMinutes raw={raw} />,

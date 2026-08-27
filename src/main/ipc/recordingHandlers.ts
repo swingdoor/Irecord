@@ -3,9 +3,10 @@ import { existsSync, statSync, renameSync } from 'fs'
 import { copyFile } from 'fs/promises'
 import { dirname, extname, join } from 'path'
 import { AudioRecorder } from '../audio/AudioRecorder'
-import { createRealtimeRecording, getAllRealtimeRecordings, getRealtimeRecording, deleteRealtimeRecording } from '../db/database'
+import { createRealtimeRecording, getRealtimeRecording, deleteRealtimeRecording } from '../db/database'
 import { logError } from '../utils/errorHandler'
 import { registerFile, removeReference } from '../services/fileManager'
+import { getAllRecordingsForIpc, getRecording } from '../services/applicationService'
 
 function getUniqueFileName(dir: string, baseName: string, ext: string): string {
   // 清理文件名中的非法字符
@@ -84,8 +85,7 @@ export function registerRecordingHandlers(): void {
   // 获取所有录音记录
   ipcMain.handle('get-realtime-recordings', async () => {
     try {
-      const recordings = await getAllRealtimeRecordings()
-      return JSON.parse(JSON.stringify(recordings))
+      return await getAllRecordingsForIpc()
     } catch (err: any) {
       logError('get-realtime-recordings', err)
       return { error: err.message || '获取录音记录失败' }
@@ -95,9 +95,7 @@ export function registerRecordingHandlers(): void {
   // 获取单个录音记录
   ipcMain.handle('get-realtime-recording', async (_event, id: string) => {
     try {
-      const recording = await getRealtimeRecording(id)
-      if (!recording) return { error: '录音记录不存在' }
-      return { recording: JSON.parse(JSON.stringify(recording)) }
+      return { recording: await getRecording(id) }
     } catch (err: any) {
       logError('get-realtime-recording', err)
       return { error: err.message || '获取录音记录失败' }

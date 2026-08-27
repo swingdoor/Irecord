@@ -28,7 +28,7 @@ export default function KnowledgeDetailPage() {
       setPage('taskList')
       return
     }
-    window.electronAPI.getKnowledgeDoc(currentKnowledgeDocId).then(res => {
+    window.electronAPI.getKnowledgeDoc(currentKnowledgeDocId).then((res: { doc?: any; error?: string }) => {
       if (res.error || !res.doc) {
         message.error(res.error || '文档不存在')
         setPage('taskList')

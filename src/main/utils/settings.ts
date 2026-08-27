@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 
 export interface AsrParams {
   vadThreshold: number
@@ -34,6 +34,7 @@ export interface AppSettings {
   themeMode?: 'default' | 'monochrome'
   debugAsrLog?: boolean
   asrParams?: Partial<AsrParams>
+  mcpEnabled?: boolean
 }
 
 export const ASR_DEFAULTS: AsrParams = {
@@ -78,14 +79,20 @@ export function getSettings(): AppSettings {
   return settingsCache
 }
 
+export function saveSettings(settings: Record<string, unknown>): AppSettings {
+  writeFileSync(getSettingsPath(), JSON.stringify(settings, null, 2), 'utf-8')
+  settingsCache = settings as AppSettings
+  return settingsCache
+}
+
+export function updateSettings(patch: Partial<AppSettings>): AppSettings {
+  return saveSettings({ ...getSettings(), ...patch })
+}
+
 export function getAsrParams(): AsrParams {
   const settings = getSettings()
   return {
     ...ASR_DEFAULTS,
     ...(settings.asrParams || {}),
   }
-}
-
-export function invalidateSettingsCache(): void {
-  settingsCache = null
 }

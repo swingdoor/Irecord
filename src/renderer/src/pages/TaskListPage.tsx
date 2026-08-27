@@ -95,17 +95,16 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
       window.electronAPI.getSettings(),
     ]).then(([models, settings]) => {
       setAvailableModels(models)
-      const defaultModel = settings.defaultModel || models.find(m => m.available)?.id || 'qwen3-asr'
+      const defaultModel = settings.defaultModel || models.find((model: { available: boolean }) => model.available)?.id || 'qwen3-asr'
       setSelectedModel(defaultModel)
       // Restore active tab from settings
       if (settings.activeTab) setActiveTab(settings.activeTab)
     })
-    window.electronAPI.getCurrentTaskInfo().then(info => {
+    window.electronAPI.getCurrentTaskInfo().then((info: { taskId: string | null; startTime: number }) => {
       if (info.startTime) setProcessingStartTime(info.startTime)
     })
-    const unsub = window.electronAPI.onTaskStatusChanged((data) => {
+    const unsub = window.electronAPI.onTaskStatusChanged((data: { taskId: string; startTime?: number }) => {
       if (data.startTime) setProcessingStartTime(data.startTime)
-      refreshTasks()
       // 清理已完成任务的进度
       if (data.taskId) {
         setTaskProgress(prev => {
@@ -115,23 +114,11 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
         })
       }
     })
-    const unsubProgress = window.electronAPI.onTaskProgress((data) => {
+    const unsubProgress = window.electronAPI.onTaskProgress((data: { taskId: string; stage: string; percent: number }) => {
       setTaskProgress(prev => ({ ...prev, [data.taskId]: { stage: data.stage, percent: data.percent } }))
     })
     return () => { unsub(); unsubProgress() }
   }, [refreshTasks, refreshRealtimeRecordings, refreshKnowledgeDocs, refreshTemplates])
-
-  // 轮询：当有 generating 状态的文档时，每 3 秒刷新
-  useEffect(() => {
-    const hasGenerating = knowledgeDocs.some(d => d.status === 'generating')
-    if (!hasGenerating) return
-
-    const timer = setInterval(() => {
-      refreshKnowledgeDocs()
-    }, 3000)
-
-    return () => clearInterval(timer)
-  }, [knowledgeDocs, refreshKnowledgeDocs])
 
   const handleSettingsChange = useCallback((settings: Record<string, any>) => {
     if (settings.defaultModel) setSelectedModel(settings.defaultModel)
@@ -198,7 +185,10 @@ export default function TaskListPage({ themeMode, onThemeChange }: TaskListPageP
 
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
-      const result = await window.electronAPI.addDroppedFiles(files.map(f => f.path), selectedModel)
+      const result = await window.electronAPI.addDroppedFiles(
+        files.map(file => (file as File & { path: string }).path),
+        selectedModel,
+      )
       if (result.errors?.length) setAddErrors(result.errors)
       if (result.tasks?.length > 0) {
         setActiveTab('upload')
