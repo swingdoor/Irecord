@@ -180,7 +180,8 @@ const electronAPI = {
   // ===== 润色 =====
   polishText: (params: {
     text: string
-    type: 'polish' | 'rewrite' | 'expand'
+    type: 'polish' | 'expand' | 'custom'
+    instruction?: string
   }): Promise<{ result?: string; error?: string }> =>
     ipcRenderer.invoke('polish-text', params),
 

@@ -208,14 +208,14 @@ export function getKnowledgeDocPrompt(templatePrompt: string, texts: string[]) {
 
 // ===== 知识整理 - 局部润色 =====
 
-export function getPolishPrompt(text: string, type: 'polish' | 'rewrite' | 'expand') {
+export function getPolishPrompt(text: string, type: 'polish' | 'expand' | 'custom', instruction?: string) {
   const instructions: Record<string, string> = {
     polish: '请对以下文字进行润色，优化表达，使语言更加流畅自然，但保持原意不变。',
-    rewrite: '请用不同的方式改写以下文字，保持核心含义但换一种表达方式。',
     expand: '请对以下文字进行扩写，补充细节和论述，使内容更加丰富完整。',
+    custom: '请根据用户给出的修改要求处理原文，保持原文事实，不要编造数据或信息。',
   }
   return {
     system: instructions[type] + '\n\n直接输出修改后的文字，不要包含任何解释或标记。',
-    user: text
+    user: type === 'custom' ? `修改要求：${instruction?.trim()}\n\n原文：\n${text}` : text
   }
 }

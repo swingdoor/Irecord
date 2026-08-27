@@ -5,13 +5,13 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import Link from '@tiptap/extension-link'
-import { Button, Space, Tooltip, App, Card } from 'antd'
+import { Button, Space, Tooltip, App, Card, Input } from 'antd'
 import {
   BoldOutlined, ItalicOutlined, UnderlineOutlined, StrikethroughOutlined,
   OrderedListOutlined, UnorderedListOutlined, MinusOutlined,
   UndoOutlined, RedoOutlined, LinkOutlined,
   CheckOutlined, CloseOutlined, ReloadOutlined, LoadingOutlined,
-  HighlightOutlined, SwapOutlined, ExpandOutlined, EnterOutlined,
+  HighlightOutlined, ExpandOutlined, EditOutlined,
 } from '@ant-design/icons'
 
 interface TipTapEditorProps {
@@ -20,13 +20,15 @@ interface TipTapEditorProps {
   extraActions?: React.ReactNode
 }
 
-type PolishType = 'polish' | 'rewrite' | 'expand'
+type PolishType = 'polish' | 'expand' | 'custom'
 
 export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProps) {
   const { message } = App.useApp()
   const [polishing, setPolishing] = useState(false)
   const [polishResult, setPolishResult] = useState<{ original: string; result: string; type: PolishType; from: number; to: number } | null>(null)
-  const lastPolishTypeRef = useRef<PolishType>('polish')
+  const [showCustomInput, setShowCustomInput] = useState(false)
+  const [customInstruction, setCustomInstruction] = useState('')
+  const lastPolishRequestRef = useRef<{ type: PolishType; instruction?: string }>({ type: 'polish' })
   const bubbleRef = useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
@@ -56,7 +58,7 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
         appendTo: () => document.body,
         onHide: () => {
           // 只在没有润色结果和不在润色中时允许隐藏
-          if (polishResult || polishing) return false
+          if (polishResult || polishing || showCustomInput) return false
         },
       },
       shouldShow: ({ editor }) => {
@@ -66,7 +68,7 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
     })
     editor.registerPlugin(plugin)
     return () => { editor.unregisterPlugin('aiPolishBubble') }
-  }, [editor, polishing, polishResult])
+  }, [editor, polishing, polishResult, showCustomInput])
 
   useEffect(() => {
     if (editor && value && !editor.isFocused) {
@@ -89,27 +91,37 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
     }
   }, [editor])
 
-  const handlePolishStart = useCallback(async (type: PolishType) => {
+  const handlePolishStart = useCallback(async (type: PolishType, instruction?: string) => {
     if (!editor) return
     const { from, to } = editor.state.selection
     if (from === to) return
     const selectedText = editor.state.doc.textBetween(from, to, ' ')
-    lastPolishTypeRef.current = type
+    const normalizedInstruction = instruction?.trim()
+    lastPolishRequestRef.current = { type, instruction: normalizedInstruction }
+    setShowCustomInput(false)
     setPolishing(true)
     setPolishResult(null)
     try {
-      const res = await window.electronAPI.polishText({ text: selectedText, type })
+      const res = await window.electronAPI.polishText({ text: selectedText, type, instruction: normalizedInstruction })
       if (res.error) {
         message.error(res.error)
       } else {
         setPolishResult({ original: selectedText, result: res.result, type, from, to })
       }
     } catch {
-      message.error('润色失败')
+      message.error('处理失败')
     } finally {
       setPolishing(false)
     }
   }, [editor, message])
+
+  const handleCustomSubmit = useCallback(() => {
+    if (!customInstruction.trim()) {
+      message.warning('请输入修改要求')
+      return
+    }
+    handlePolishStart('custom', customInstruction)
+  }, [customInstruction, handlePolishStart, message])
 
   const handlePolishAccept = useCallback(() => {
     if (!editor || !polishResult) return
@@ -122,7 +134,8 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
   }, [])
 
   const handlePolishRetry = useCallback(() => {
-    handlePolishStart(lastPolishTypeRef.current)
+    const { type, instruction } = lastPolishRequestRef.current
+    handlePolishStart(type, instruction)
   }, [handlePolishStart])
 
   if (!editor) return null
@@ -177,7 +190,7 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
               </div>
             </div>
             <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 12, color: '#1677ff', marginBottom: 4 }}>润色结果</div>
+              <div style={{ fontSize: 12, color: '#1677ff', marginBottom: 4 }}>AI 修改结果</div>
               <div style={{ fontSize: 13, lineHeight: 1.6, background: '#f0f5ff', padding: '6px 8px', borderRadius: 4 }}>
                 {polishResult.result.length > 200 ? polishResult.result.slice(0, 200) + '...' : polishResult.result}
               </div>
@@ -190,13 +203,35 @@ export function TipTapEditor({ value, onChange, extraActions }: TipTapEditorProp
           </Card>
         ) : polishing ? (
           <Card size="small" style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-            <Space><LoadingOutlined /><span style={{ fontSize: 13 }}>正在润色...</span></Space>
+            <Space><LoadingOutlined /><span style={{ fontSize: 13 }}>正在处理...</span></Space>
+          </Card>
+        ) : showCustomInput ? (
+          <Card size="small" style={{ width: 380, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <Input.TextArea
+              autoFocus
+              value={customInstruction}
+              onChange={(e) => setCustomInstruction(e.target.value)}
+              placeholder="例如：改成更正式的语气，并压缩到 100 字以内"
+              autoSize={{ minRows: 2, maxRows: 5 }}
+              maxLength={500}
+              showCount
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  handleCustomSubmit()
+                }
+              }}
+            />
+            <Space style={{ width: '100%', justifyContent: 'flex-end', marginTop: 12 }}>
+              <Button size="small" onClick={() => setShowCustomInput(false)}>取消</Button>
+              <Button size="small" type="primary" disabled={!customInstruction.trim()} onClick={handleCustomSubmit}>生成</Button>
+            </Space>
           </Card>
         ) : (
           <div style={{ background: '#fff', padding: '4px 6px', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.15)', display: 'flex', gap: 2 }}>
             <Button size="small" type="text" icon={<HighlightOutlined />} onClick={() => handlePolishStart('polish')}>润色</Button>
-            <Button size="small" type="text" icon={<SwapOutlined />} onClick={() => handlePolishStart('rewrite')}>改写</Button>
             <Button size="small" type="text" icon={<ExpandOutlined />} onClick={() => handlePolishStart('expand')}>扩写</Button>
+            <Button size="small" type="text" icon={<EditOutlined />} onClick={() => setShowCustomInput(true)}>自定义</Button>
           </div>
         )}
       </div>

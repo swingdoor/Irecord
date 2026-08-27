@@ -210,11 +210,19 @@ export function registerKnowledgeHandlers(): void {
   // 局部润色
   ipcMain.handle('polish-text', async (_event, params: {
     text: string
-    type: 'polish' | 'rewrite' | 'expand'
+    type: 'polish' | 'expand' | 'custom'
+    instruction?: string
   }) => {
     try {
+      if (!params.text?.trim()) return { error: '请选择需要修改的文字' }
+      if (!['polish', 'expand', 'custom'].includes(params.type)) return { error: '不支持的修改类型' }
+      if (params.type === 'custom') {
+        const instruction = params.instruction?.trim()
+        if (!instruction) return { error: '请输入修改要求' }
+        if (instruction.length > 500) return { error: '修改要求不能超过 500 字' }
+      }
       const settings = getSettings()
-      const prompt = getPolishPrompt(params.text, params.type)
+      const prompt = getPolishPrompt(params.text, params.type, params.instruction)
       const result = await callLLM(settings, prompt.system, prompt.user, 1, false)
       return { result: result.trim() }
     } catch (err: unknown) {
